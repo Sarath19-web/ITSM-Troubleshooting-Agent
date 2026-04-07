@@ -1,26 +1,35 @@
 import { useState } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
-import { MessageSquare, LayoutDashboard, Settings, ChevronLeft, ChevronRight, Bot } from "lucide-react";
-import type { Session } from "@/lib/types";
+import { useQuery } from "@tanstack/react-query";
+import { MessageSquare, LayoutDashboard, FileText, ChevronLeft, ChevronRight, Bot, RefreshCw, Loader2 } from "lucide-react";
+import { getHealth, getCacheStats, listSessions } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 
-interface AppSidebarProps {
-  sessions?: Session[];
-  openTickets?: number;
-  avgResponseTime?: string;
-  baseUrl?: string;
-  onBaseUrlChange?: (url: string) => void;
-}
-
-export function AppSidebar({ sessions = [], openTickets = 0, avgResponseTime = "—", baseUrl = "", onBaseUrlChange }: AppSidebarProps) {
+export function AppSidebar() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [editingUrl, setEditingUrl] = useState(false);
-  const [urlInput, setUrlInput] = useState(baseUrl);
 
   const navItems = [
     { label: "Chat", to: "/", icon: MessageSquare },
     { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
+    { label: "Logs", to: "/logs", icon: FileText },
   ];
+
+  const { data: health, isLoading: healthLoading } = useQuery({
+    queryKey: ["health"],
+    queryFn: getHealth,
+    refetchInterval: 30_000,
+  });
+
+  const { data: cacheStats, isLoading: cacheLoading } = useQuery({
+    queryKey: ["cache-stats"],
+    queryFn: getCacheStats,
+  });
+
+  const { data: sessionsData, isLoading: sessionsLoading, refetch: refetchSessions } = useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => listSessions(10),
+  });
 
   return (
     <aside
@@ -35,7 +44,7 @@ export function AppSidebar({ sessions = [], openTickets = 0, avgResponseTime = "
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
+      <nav className="px-2 py-4 space-y-1">
         {navItems.map((item) => {
           const isActive = item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
           return (
@@ -55,60 +64,77 @@ export function AppSidebar({ sessions = [], openTickets = 0, avgResponseTime = "
         })}
       </nav>
 
-      {/* Quick Stats */}
-      {!collapsed && (
-        <div className="px-4 py-3 border-t border-sidebar-border">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 mb-2">Quick Stats</p>
-          <div className="space-y-1.5 text-sm">
-            <div className="flex justify-between">
-              <span className="text-sidebar-foreground/70">Open Tickets</span>
-              <span className="font-semibold text-warning">{openTickets}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-sidebar-foreground/70">Avg Response</span>
-              <span className="font-semibold">{avgResponseTime}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Recent Sessions */}
-      {!collapsed && sessions.length > 0 && (
-        <div className="px-4 py-3 border-t border-sidebar-border">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 mb-2">Recent Sessions</p>
-          <div className="space-y-1">
-            {sessions.slice(0, 3).map((s) => (
-              <div key={s.id} className="text-sm text-sidebar-foreground/70 truncate">
-                • {s.label} ({s.messageCount} msgs)
-              </div>
-            ))}
+      {!collapsed && (
+        <div className="px-4 py-3 border-t border-sidebar-border flex-1 overflow-y-auto">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">Recent Sessions</p>
+            <button onClick={() => refetchSessions()} className="text-sidebar-foreground/50 hover:text-sidebar-foreground">
+              <RefreshCw className="w-3 h-3" />
+            </button>
           </div>
+          {sessionsLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-full bg-sidebar-accent/30" />
+              <Skeleton className="h-8 w-full bg-sidebar-accent/30" />
+            </div>
+          ) : sessionsData?.sessions && sessionsData.sessions.length > 0 ? (
+            <div className="space-y-1">
+              {sessionsData.sessions.map((s) => (
+                <Link
+                  key={s.session_id}
+                  to="/"
+                  search={{ sessionId: s.session_id }}
+                  className="text-xs text-sidebar-foreground/70 px-2 py-1.5 rounded hover:bg-sidebar-accent/50 cursor-pointer truncate block hover:text-sidebar-foreground transition-colors"
+                  title={s.label || s.session_id}
+                >
+                  {s.label || s.session_id} <span className="text-sidebar-foreground/40">({s.message_count})</span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-sidebar-foreground/40">No sessions yet</p>
+          )}
         </div>
       )}
 
-      {/* Settings */}
+      {/* Cache Stats */}
       {!collapsed && (
         <div className="px-4 py-3 border-t border-sidebar-border">
-          <div className="flex items-center gap-2 text-sm text-sidebar-foreground/70 mb-1">
-            <Settings className="w-4 h-4" />
-            <span>Settings</span>
-          </div>
-          <div className="text-xs text-sidebar-foreground/50">
-            {editingUrl ? (
-              <input
-                className="w-full bg-sidebar-accent text-sidebar-foreground px-2 py-1 rounded text-xs font-mono"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                onBlur={() => { onBaseUrlChange?.(urlInput); setEditingUrl(false); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { onBaseUrlChange?.(urlInput); setEditingUrl(false); } }}
-                autoFocus
-              />
-            ) : (
-              <button onClick={() => setEditingUrl(true)} className="hover:text-sidebar-foreground transition-colors font-mono truncate block w-full text-left">
-                API: {baseUrl}
-              </button>
-            )}
-          </div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 mb-2">Cache Stats</p>
+          {cacheLoading ? (
+            <Skeleton className="h-8 w-full bg-sidebar-accent/30" />
+          ) : cacheStats ? (
+            <div className="space-y-1 text-xs text-sidebar-foreground/70">
+              <div className="flex justify-between"><span>Entries</span><span className="font-semibold text-sidebar-foreground">{cacheStats.total_entries}</span></div>
+              <div className="flex justify-between"><span>Total Hits</span><span className="font-semibold text-sidebar-foreground">{cacheStats.total_hits}</span></div>
+            </div>
+          ) : (
+            <p className="text-xs text-sidebar-foreground/40">Unavailable</p>
+          )}
+        </div>
+      )}
+
+      {/* Health */}
+      {!collapsed && (
+        <div className="px-4 py-3 border-t border-sidebar-border">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 mb-2">Health</p>
+          {healthLoading ? (
+            <Loader2 className="w-3 h-3 animate-spin text-sidebar-foreground/50" />
+          ) : health ? (
+            <div className="space-y-1 text-xs text-sidebar-foreground/70">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${health.status === "healthy" ? "bg-success" : "bg-danger"}`} />
+                <span>{health.status}</span>
+              </div>
+              <div className="flex justify-between"><span>KB</span><span>{health.kb_loaded ? "✓ Loaded" : "✗ Not loaded"}</span></div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-danger">
+              <span className="w-2 h-2 rounded-full bg-danger" />
+              <span>Offline</span>
+            </div>
+          )}
         </div>
       )}
 

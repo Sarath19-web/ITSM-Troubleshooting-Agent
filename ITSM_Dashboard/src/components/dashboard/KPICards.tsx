@@ -1,11 +1,37 @@
+import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, Clock, CheckCircle, BarChart3 } from "lucide-react";
-import type { TicketStats } from "@/lib/types";
+import { getTicketStats } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 
-interface KPICardsProps {
-  stats: TicketStats;
-}
+export function KPICards() {
+  const { data: stats, isLoading, isError, refetch } = useQuery({
+    queryKey: ["ticket-stats"],
+    queryFn: getTicketStats,
+    refetchInterval: 10_000,
+  });
 
-export function KPICards({ stats }: KPICardsProps) {
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bg-card rounded-xl border border-border p-6">
+            <Skeleton className="h-4 w-20 mb-3" />
+            <Skeleton className="h-8 w-16" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (isError || !stats) {
+    return (
+      <div className="bg-card rounded-xl border border-border p-6 text-center">
+        <p className="text-sm text-muted-foreground">Failed to load stats</p>
+        <button onClick={() => refetch()} className="mt-2 text-xs text-primary hover:underline">Retry</button>
+      </div>
+    );
+  }
+
   const cards = [
     { label: "Open", value: stats.open, icon: AlertCircle, color: "text-warning", bg: "bg-warning/10" },
     { label: "In Progress", value: stats.in_progress, icon: Clock, color: "text-info", bg: "bg-info/10" },

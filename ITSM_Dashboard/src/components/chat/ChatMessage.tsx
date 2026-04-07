@@ -1,4 +1,4 @@
-import { Bot } from "lucide-react";
+import { Bot, Zap } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { TicketBubble } from "./TicketBubble";
@@ -12,7 +12,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"} mb-4`}>
-      {/* Avatar */}
       {!isUser && (
         <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0 mt-1">
           <Bot className="w-4 h-4 text-primary-foreground" />
@@ -20,7 +19,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
       )}
 
       <div className={`max-w-[75%] space-y-2 ${isUser ? "items-end" : "items-start"} flex flex-col`}>
-        {/* Message bubble */}
         <div
           className={`px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
             isUser
@@ -31,6 +29,13 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {message.content}
         </div>
 
+        {/* Cache badge */}
+        {message.from_cache && !isUser && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-success/15 text-success font-medium">
+            <Zap className="w-3 h-3" /> Cached response (instant)
+          </span>
+        )}
+
         {/* Ticket card */}
         {message.ticket && <TicketBubble ticket={message.ticket} />}
 
@@ -39,7 +44,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <div className="flex flex-wrap gap-1">
             {message.kb_sources.map((kb, i) => (
               <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground font-medium">
-                {kb.preview.slice(0, 40)}
+                📚 {kb.preview.slice(0, 40)}
               </span>
             ))}
           </div>

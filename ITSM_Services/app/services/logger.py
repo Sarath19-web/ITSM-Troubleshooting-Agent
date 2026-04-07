@@ -1,8 +1,3 @@
-"""
-Structured logging service for ITSM Agent.
-Logs every operation from application startup to file + console.
-JSONL format for easy parsing by log aggregators (Splunk, ELK, Datadog).
-"""
 import json
 import logging
 import os

@@ -1,31 +1,27 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface CreateTicketModalProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (data: { summary: string; category: string; priority: string; description: string }) => void;
+  categories?: string[];
 }
 
-const CATEGORIES = ["Network & VPN", "Email & Calendar", "Account & Access", "Hardware", "Software Installation", "Printing", "Security"];
-const PRIORITIES = [
-  { value: "P1", label: "P1 — Critical" },
-  { value: "P2", label: "P2 — High" },
-  { value: "P3", label: "P3 — Medium" },
-  { value: "P4", label: "P4 — Low" },
-];
-
-export function CreateTicketModal({ open, onClose, onSubmit }: CreateTicketModalProps) {
+export function CreateTicketModal({ open, onClose, onSubmit, categories }: CreateTicketModalProps) {
   const [summary, setSummary] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState("");
   const [priority, setPriority] = useState("P2");
   const [description, setDescription] = useState("");
 
   if (!open) return null;
 
+  const cats = Array.isArray(categories) ? categories : [];
+
   const handleSubmit = () => {
     if (!summary.trim()) return;
-    onSubmit({ summary, category, priority, description });
+    onSubmit({ summary, category: category || cats[0] || "General", priority, description });
     setSummary("");
     setDescription("");
     onClose();
@@ -53,13 +49,17 @@ export function CreateTicketModal({ open, onClose, onSubmit }: CreateTicketModal
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium mb-1 block">Category</label>
-              <select
-                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              {cats.length === 0 ? (
+                <Skeleton className="h-9 w-full" />
+              ) : (
+                <select
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  value={category || cats[0]}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium mb-1 block">Priority</label>
@@ -68,7 +68,10 @@ export function CreateTicketModal({ open, onClose, onSubmit }: CreateTicketModal
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
               >
-                {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                <option value="P1">P1 — Critical</option>
+                <option value="P2">P2 — High</option>
+                <option value="P3">P3 — Medium</option>
+                <option value="P4">P4 — Low</option>
               </select>
             </div>
           </div>
