@@ -1,0 +1,31 @@
+{
+	"info": {"name": "ITSM Agent API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+	"variable": [{"key": "base_url", "value": "http://localhost:8000"}, {"key": "session_id", "value": "demo-session"}, {"key": "ticket_id", "value": "INC001001"}],
+	"item": [
+		{"name": "1. Health", "item": [
+			{"name": "Health Check", "request": {"method": "GET", "url": {"raw": "{{base_url}}/health"}}},
+			{"name": "Get Categories", "request": {"method": "GET", "url": {"raw": "{{base_url}}/categories"}}}
+		]},
+		{"name": "2. Chat", "item": [
+			{"name": "Greeting", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"Hello, I need help\", \"session_id\": \"{{session_id}}\", \"user_name\": \"John Doe\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "VPN Issue", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"My VPN keeps disconnecting every 5 minutes\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "Follow Up", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"I tried restarting the client but it still disconnects\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "Ask Ticket Status", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"What is the status of INC001001?\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "Vague Input", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"Nothing is working\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "Multi Intent", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"My email is not syncing and also the printer is not working\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}},
+			{"name": "Direct Ticket Request", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"message\": \"I want to raise a ticket for a broken monitor\", \"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/chat"}}}
+		]},
+		{"name": "3. Tickets", "item": [
+			{"name": "Create Ticket", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"session_id\": \"{{session_id}}\", \"summary\": \"VPN disconnects every 5 minutes\", \"category\": \"Network & VPN\", \"priority\": \"P2\", \"description\": \"Tried restarting VPN client and clearing cache. Still disconnects on WiFi.\", \"user_name\": \"John Doe\"}"}, "url": {"raw": "{{base_url}}/tickets"}}},
+			{"name": "List All Tickets", "request": {"method": "GET", "url": {"raw": "{{base_url}}/tickets"}}},
+			{"name": "List Open Tickets", "request": {"method": "GET", "url": {"raw": "{{base_url}}/tickets?status=Open"}}},
+			{"name": "Ticket Stats", "request": {"method": "GET", "url": {"raw": "{{base_url}}/tickets/stats"}}},
+			{"name": "Get Ticket by ID", "request": {"method": "GET", "url": {"raw": "{{base_url}}/tickets/{{ticket_id}}"}}},
+			{"name": "Update Ticket Status", "request": {"method": "PATCH", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"status\": \"In Progress\", \"notes\": \"Investigating VPN server logs\"}"}, "url": {"raw": "{{base_url}}/tickets/{{ticket_id}}"}}}
+		]},
+		{"name": "4. Session", "item": [
+			{"name": "Get Session Info", "request": {"method": "GET", "url": {"raw": "{{base_url}}/session/{{session_id}}"}}},
+			{"name": "Reset Session", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"session_id\": \"{{session_id}}\"}"}, "url": {"raw": "{{base_url}}/session/reset"}}}
+		]}
+	]
+}
