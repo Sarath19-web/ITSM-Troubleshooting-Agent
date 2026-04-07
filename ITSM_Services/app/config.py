@@ -10,7 +10,8 @@ PIPELINE_LOG = str(BASE_DIR / "logs" / "pipeline.jsonl")
 LOG_DIR = str(BASE_DIR / "logs")
 
 EMBEDDING_MODEL = "nomic-embed-text"
-LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
+# LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 RETRIEVAL_K = 6

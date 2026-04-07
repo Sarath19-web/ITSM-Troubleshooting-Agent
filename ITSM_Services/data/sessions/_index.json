@@ -1,0 +1,32 @@
+{
+  "session-1775571887106": {
+    "session_id": "session-1775571887106",
+    "user_name": "User",
+    "label": "hi",
+    "category": "Printer & Peripherals",
+    "message_count": 8,
+    "ticket_created": null,
+    "created_at": "2026-04-07T14:24:53.761438",
+    "updated_at": "2026-04-07T14:39:10.064423"
+  },
+  "session-1775572907201": {
+    "session_id": "session-1775572907201",
+    "user_name": "User",
+    "label": "hi",
+    "category": "Network & VPN",
+    "message_count": 10,
+    "ticket_created": null,
+    "created_at": "2026-04-07T14:41:49.758770",
+    "updated_at": "2026-04-07T16:15:11.482488"
+  },
+  "session-1775579026259": {
+    "session_id": "session-1775579026259",
+    "user_name": "User",
+    "label": "Cannot add work email to Outlook",
+    "category": "Email & Calendar",
+    "message_count": 2,
+    "ticket_created": null,
+    "created_at": "2026-04-07T16:24:27.452836",
+    "updated_at": "2026-04-07T16:26:37.737535"
+  }
+}

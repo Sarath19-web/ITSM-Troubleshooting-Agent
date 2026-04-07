@@ -1,0 +1,37 @@
+{
+  "session_id": "session-1775579026259",
+  "user_name": "User",
+  "current_category": "Email & Calendar",
+  "troubleshoot_turn": 1,
+  "steps_completed": [],
+  "failed_steps": [],
+  "deferred_intents": [],
+  "clarifying_questions_asked": 1,
+  "ticket_created": null,
+  "history": [
+    {
+      "role": "user",
+      "content": "Cannot add work email to Outlook",
+      "timestamp": "2026-04-07T16:24:27.452836",
+      "metadata": {}
+    },
+    {
+      "role": "agent",
+      "content": "**Acknowledge**\nI understand that you're having trouble adding your work email to Outlook. That can be frustrating! Let's take it one step at a time.\n\n**One Step**\nBefore we dive into troubleshooting, can you please confirm if you've already set up your work email account on the Outlook app?",
+      "timestamp": "2026-04-07T16:26:33.945788",
+      "metadata": {
+        "intent": "troubleshoot",
+        "category": "Email & Calendar",
+        "turn": 1,
+        "deferred_intents": [],
+        "kb_articles": [
+          "KB002_Email_Configuration_Setup.md",
+          "KB002_Email_Configuration_Setup.md",
+          "KB002_Email_Configuration_Setup.md"
+        ]
+      }
+    }
+  ],
+  "created_at": "2026-04-07T16:24:27.452836",
+  "updated_at": "2026-04-07T16:26:37.737535"
+}
