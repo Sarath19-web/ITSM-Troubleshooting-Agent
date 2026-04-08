@@ -24,9 +24,19 @@
     "user_name": "User",
     "label": "Cannot add work email to Outlook",
     "category": "Email & Calendar",
-    "message_count": 2,
+    "message_count": 10,
     "ticket_created": null,
     "created_at": "2026-04-07T16:24:27.452836",
-    "updated_at": "2026-04-07T16:41:59.702911"
+    "updated_at": "2026-04-08T07:29:47.257921"
+  },
+  "session-1775631518783": {
+    "session_id": "session-1775631518783",
+    "user_name": "User",
+    "label": "I have connected to the Office network is this secure?",
+    "category": "Network & VPN",
+    "message_count": 10,
+    "ticket_created": null,
+    "created_at": "2026-04-08T06:59:53.766161",
+    "updated_at": "2026-04-08T07:57:33.989096"
   }
 }

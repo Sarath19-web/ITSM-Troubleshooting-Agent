@@ -291,10 +291,13 @@ def _tail_jsonl(path, n=100):
     last = lines[-n:]
     out = []
     for line in last:
+        if not line.strip():
+            continue
         try:
             out.append(json.loads(line))
-        except Exception:
-            pass
+        except Exception as e:
+            # Log parsing errors to console but don't break
+            logger.debug(f"Failed to parse JSON line: {line.strip()[:100]} - {e}")
     return out
 
 

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { sendMessage, resetSession, createTicket, getCategories, getSessionHistory } from "@/lib/api";
+import { sendMessage, resetSession, createTicket, getCategories, getSessionHistory, getTicket } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { ChatMessage, TypingIndicator } from "@/components/chat/ChatMessage";
@@ -24,6 +24,7 @@ function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(() => urlSessionId || `session-${Date.now()}`);
   const [modalOpen, setModalOpen] = useState(false);
+  const [trackedTickets, setTrackedTickets] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: categories } = useQuery({
@@ -58,6 +59,51 @@ function ChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isTyping]);
 
+  // Poll for ticket status updates
+  useEffect(() => {
+    if (trackedTickets.size === 0) return;
+
+    const pollTickets = async () => {
+      for (const ticketId of trackedTickets) {
+        try {
+          const ticket = await getTicket(ticketId);
+          
+          // Check if ticket status changed to Resolved or Closed
+          if (ticket.status === "Resolved" || ticket.status === "Closed") {
+            // Add resolution message to chat
+            setMessages((prev) => {
+              // Check if we already added a resolution message for this ticket
+              const hasResolution = prev.some(msg => 
+                msg.content.includes(`ticket ${ticketId}`) && 
+                (msg.content.includes("resolved") || msg.content.includes("closed"))
+              );
+              if (hasResolution) return prev;
+              
+              return [...prev, {
+                id: `ticket-resolved-${ticketId}-${Date.now()}`,
+                role: "agent",
+                content: `✓ **Ticket ${ticketId} has been ${ticket.status.toLowerCase()}**`,
+                timestamp: new Date(),
+              }];
+            });
+            
+            // Stop tracking this ticket
+            setTrackedTickets(prev => {
+              const updated = new Set(prev);
+              updated.delete(ticketId);
+              return updated;
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to poll ticket ${ticketId}:`, error);
+        }
+      }
+    };
+
+    const interval = setInterval(pollTickets, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
+  }, [trackedTickets]);
+
   const handleSend = useCallback(async (text: string) => {
     const userMsg: ChatMessageType = { id: `u-${Date.now()}`, role: "user", content: text, timestamp: new Date() };
     setMessages((prev) => [...prev, userMsg]);
@@ -78,7 +124,10 @@ function ChatPage() {
         cache_type: res.cache_type,
       };
       setMessages((prev) => [...prev, agentMsg]);
+      
+      // Track ticket if one was created in this response
       if (res.ticket) {
+        setTrackedTickets(prev => new Set([...prev, res.ticket!.ticket_id]));
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
         queryClient.invalidateQueries({ queryKey: ["ticket-stats"] });
       }
@@ -108,6 +157,10 @@ function ChatPage() {
     try {
       const result = await createTicket({ ...data, session_id: sessionId, user_name: "User" });
       const ticket = result.ticket || result as any;
+      
+      // Track this ticket for status updates
+      setTrackedTickets(prev => new Set([...prev, ticket.ticket_id]));
+      
       setMessages((prev) => [...prev, {
         id: `t-${Date.now()}`,
         role: "agent",

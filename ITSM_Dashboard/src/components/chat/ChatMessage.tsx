@@ -1,5 +1,6 @@
-import { Bot, Zap } from "lucide-react";
+import { Bot, Zap, Lightbulb, ChevronDown, ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useState } from "react";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { TicketBubble } from "./TicketBubble";
 
@@ -7,8 +8,33 @@ interface ChatMessageProps {
   message: ChatMessageType;
 }
 
+// Helper function to parse markdown bold (**text**) and convert to bold elements
+function parseMarkdownBold(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={idx}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
+// Extract suggestion from content (📌 *text*)
+function extractSuggestion(text: string) {
+  // Match 📌 *...* at the end or on separate line, handling ** for bold inside
+  const suggestionMatch = text.match(/📌\s*\*(.+?)\*\s*$/s);
+  if (!suggestionMatch) {
+    return { mainContent: text, suggestion: null };
+  }
+  const suggestion = suggestionMatch[1].trim();
+  const mainContent = text.replace(/📌\s*\*.+?\*\s*$/s, "").trim();
+  return { mainContent, suggestion };
+}
+
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const [expandedSuggestion, setExpandedSuggestion] = useState(false);
+  const { mainContent, suggestion } = extractSuggestion(message.content);
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"} mb-4`}>
@@ -20,13 +46,31 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
       <div className={`max-w-[75%] space-y-2 ${isUser ? "items-end" : "items-start"} flex flex-col`}>
         <div
-          className={`px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+          className={`relative px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
             isUser
               ? "bg-user-bubble text-user-bubble-foreground rounded-[16px_16px_4px_16px]"
               : "bg-agent-bubble text-foreground rounded-[16px_16px_16px_4px]"
           }`}
         >
-          {message.content}
+          {parseMarkdownBold(mainContent)}
+          
+          {/* Suggestion icon in bottom right of bubble */}
+          {suggestion && !isUser && (
+            <button
+              onClick={() => setExpandedSuggestion(!expandedSuggestion)}
+              className="absolute bottom-2 right-2 text-foreground/60 hover:text-foreground transition-colors"
+              title="Toggle suggestion"
+            >
+              <Lightbulb className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Expandable suggestion inside bubble */}
+          {suggestion && !isUser && expandedSuggestion && (
+            <div className="mt-3 pt-3 border-t border-foreground/20 text-xs text-foreground/80">
+              {parseMarkdownBold(suggestion)}
+            </div>
+          )}
         </div>
 
         {/* Cache badge */}
