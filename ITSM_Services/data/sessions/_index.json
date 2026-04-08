@@ -4,10 +4,10 @@
     "user_name": "User",
     "label": "hi",
     "category": "Printer & Peripherals",
-    "message_count": 8,
-    "ticket_created": null,
+    "message_count": 10,
+    "ticket_created": "INC001005",
     "created_at": "2026-04-07T14:24:53.761438",
-    "updated_at": "2026-04-07T14:39:10.064423"
+    "updated_at": "2026-04-08T10:14:15.407854"
   },
   "session-1775572907201": {
     "session_id": "session-1775572907201",
@@ -27,16 +27,36 @@
     "message_count": 10,
     "ticket_created": null,
     "created_at": "2026-04-07T16:24:27.452836",
-    "updated_at": "2026-04-08T07:29:47.257921"
+    "updated_at": "2026-04-08T08:46:41.875613"
   },
   "session-1775631518783": {
     "session_id": "session-1775631518783",
     "user_name": "User",
     "label": "I have connected to the Office network is this secure?",
-    "category": "Network & VPN",
-    "message_count": 10,
+    "category": null,
+    "message_count": 14,
     "ticket_created": null,
     "created_at": "2026-04-08T06:59:53.766161",
-    "updated_at": "2026-04-08T07:57:33.989096"
+    "updated_at": "2026-04-08T09:24:01.294415"
+  },
+  "session-1775640372002": {
+    "session_id": "session-1775640372002",
+    "user_name": "User",
+    "label": "Need Some Assistance in the Troubleshooting Slow Internet Speed",
+    "category": "Network & VPN",
+    "message_count": 20,
+    "ticket_created": "INC001004",
+    "created_at": "2026-04-08T09:27:01.922962",
+    "updated_at": "2026-04-08T10:05:14.687719"
+  },
+  "session-1775643849288": {
+    "session_id": "session-1775643849288",
+    "user_name": "User",
+    "label": "So my monitor is not turning off",
+    "category": "Printer & Peripherals",
+    "message_count": 9,
+    "ticket_created": "INC001006",
+    "created_at": "2026-04-08T10:33:15.899034",
+    "updated_at": "2026-04-08T10:47:58.958482"
   }
 }

@@ -84,7 +84,7 @@ NEGATIVE_RESPONSES = ["no", "nope", "nah", "negative", "not yet", "haven't"]
 POSITIVE_RESPONSES = ["yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "do it"]
 ALREADY_TRIED = ["already tried", "tried that", "did that", "already did", "still not working",
                  "didn't work", "did not work", "doesn't work", "not working", "no luck",
-                 "still broken", "still failing", "same issue"]
+                 "still broken", "still failing", "same issue", "not fixed", "not resolved"]
 
 
 class ITSMSession:
@@ -97,7 +97,9 @@ class ITSMSession:
         self.failed_steps = []
         self.awaiting_clarification = False
         self.awaiting_ticket_confirmation = False
+        self.draft_ticket = None
         self.deferred_intents = []
+        self.resolved_intents = []
         self.clarifying_questions_asked = 0
         self.ticket_created = None
         self.user_name = None
@@ -163,6 +165,14 @@ def _classify_intent(question, session=None):
     if any(s in q for s in ticket_signals):
         return "create_ticket"
 
+    resolved_signals = [
+        "thank", "thx", "thnx", "appreciate", 
+        "fixed", "resolved", "it works", "solved", 
+        "you helped", "good now", "sorted", "perfect", "awesome"
+    ]
+    if any(s in q for s in resolved_signals) and not any(s in q for s in ["not", "didn't", "doesn't"]):
+        return "issue_resolved"
+
     if re.search(r'inc\d{6}', q) or "ticket status" in q or "my ticket" in q or "check ticket" in q:
         return "ticket_status"
 
@@ -219,29 +229,33 @@ def _retrieve_kb(question, category=None):
 SYSTEM_PROMPT = """You are Alex, a friendly and patient IT Helpdesk Assistant at a Fortune 500 company.
 
 ## YOUR PERSONALITY
-- Empathetic: Acknowledge frustration
-- Patient: Never rush, never overwhelm
-- Methodical: ONE step at a time
-- Clear: Simple language, no jargon
+- Empathetic: Acknowledge frustration briefly
+- Methodical: ONE specific step at a time
+- Clear: Simple language, exact instructions
 
 ## CRITICAL RULES
-1. NEVER give all troubleshooting steps at once. Give ONE step, wait for response.
-2. ALWAYS use markdown: **bold** for important items, numbered lists, line breaks.
-3. ALWAYS ask 1 clarifying question first if the issue is vague.
-4. If user says "already tried that" or "didn't work" → MOVE TO NEXT STEP, never repeat.
-5. If KB doesn't have a clear answer → suggest creating a ticket.
-6. After 4-5 unsuccessful steps → offer to create a ticket.
+1. NEVER give all troubleshooting steps at once. Give ONE step, then STOP.
+2. Every step MUST be a specific action with exact instructions (e.g. "Click Start > Settings > System > Power & sleep" NOT "check your settings").
+3. ALWAYS include exact paths, menu names, or commands. Users should be able to follow without guessing.
+4. ALWAYS ask 1 clarifying question first if the issue is vague.
+5. If user says "already tried that" or "didn't work" → MOVE TO NEXT STEP, never repeat.
+6. DO NOT REPEAT previous questions or steps. Once the user replies, acknowledge and give a NEW step.
+7. If KB doesn't have a clear answer → suggest creating a ticket.
+8. After 4-5 unsuccessful steps → offer to create a ticket.
+9. DO NOT add filler like "Let me know if this helps!" or "Would you like further assistance?". Just give the step and ask what happened.
+10. ALWAYS end with a specific question like "Did that work?" or "What do you see now?".
 
 ## RESPONSE FORMAT
-**Acknowledge** → **One Step** → **Wait**
+Use markdown: **bold** for important items, numbered lists for sub-steps.
+Format: **Brief acknowledgment** → **Step N: Title** → **Numbered sub-steps** → **Short question**
 
 Example:
-> I understand — VPN disconnects can be disruptive. Let's get this sorted.
+> I understand — VPN disconnects can be disruptive. Let's fix this.
 >
 > **Step 1: Check your internet connection**
 > 1. Open a browser
-> 2. Visit https://www.google.com
-> 3. Let me know if it loads ✓ or fails ✗
+> 2. Go to **https://www.google.com**
+> 3. Does the page load? ✓ or ✗
 
 ## WHEN TO CREATE A TICKET
 Output EXACTLY this on its own lines (the system will parse it):
@@ -286,6 +300,10 @@ def _build_prompt(question, session, kb_chunks, intent_hint=""):
         extra = "\n## IMPORTANT: User answered NO. Acknowledge and move forward differently.\n"
     elif intent_hint == "affirmative_response":
         extra = "\n## IMPORTANT: User answered YES. Proceed with next logical action.\n"
+    elif intent_hint == "edit_ticket":
+        extra = f"\n## IMPORTANT: User wants to edit the drafted ticket. Draft so far: {session.draft_ticket}. Output a rewritten [CREATE_TICKET] block reflecting their adjustments.\n"
+    elif intent_hint == "create_ticket":
+        extra = "\n## IMPORTANT: User specifically requested to create a ticket! STOP troubleshooting immediately and output a [CREATE_TICKET] block based on the context.\n"
 
     return f"""{SYSTEM_PROMPT}
 
@@ -378,6 +396,37 @@ def process_message(question, session_id, user_name=None):
     intent = _classify_intent(question, session)
     logger.info(f"Classified intent: {intent}")
 
+    if session.awaiting_ticket_confirmation and session.draft_ticket:
+        if intent in ["affirmative_response", "issue_resolved"]:
+            ticket = ticket_service.create_ticket(
+                summary=session.draft_ticket.get("summary", "Support Ticket"),
+                description=session.draft_ticket.get("description", ""),
+                category=session.draft_ticket.get("category", session.current_category or "Other"),
+                priority=session.draft_ticket.get("priority", _detect_priority(question)),
+                session_id=session_id,
+                user_name=session.user_name,
+                troubleshooting_done=session.steps_completed,
+                conversation_history=[{"role": h["role"], "content": h["content"]} for h in session.history],
+            )
+            session.ticket_created = ticket
+            session.draft_ticket = None
+            session.awaiting_ticket_confirmation = False
+            msg = "I've successfully submitted your ticket!" + _format_ticket_card(ticket)
+            session.add_message("agent", msg, {"intent": "ticket_created", "ticket_created": ticket["ticket_id"]})
+            save_session(session)
+            elapsed = (time.time() - overall_start) * 1000
+            return _result(msg, session, elapsed, intent="ticket_created", ticket=ticket)
+        elif intent == "negative_response":
+            session.draft_ticket = None
+            session.awaiting_ticket_confirmation = False
+            msg = "Okay, I've cancelled the ticket draft. What would you like to do next?"
+            session.add_message("agent", msg, {"intent": "ticket_cancelled"})
+            save_session(session)
+            elapsed = (time.time() - overall_start) * 1000
+            return _result(msg, session, elapsed, intent="ticket_cancelled")
+        else:
+            intent = "edit_ticket"
+
     # ── Greeting
     if intent == "greeting":
         greeting = ("Hi there! I'm Alex, your IT Helpdesk Assistant 👋\n\n"
@@ -393,6 +442,87 @@ def process_message(question, session_id, user_name=None):
     # ── Ticket status
     if intent == "ticket_status":
         return _handle_ticket_status(question, session, overall_start)
+
+    # ── Issue Resolved
+    if intent == "issue_resolved":
+        msg = "I'm glad to hear that's resolved!\n\n"
+        if session.current_category and session.current_category not in session.resolved_intents:
+            session.resolved_intents.append(session.current_category)
+
+        session.steps_completed = []
+        session.failed_steps = []
+        session.troubleshoot_turn = 0
+        session.awaiting_clarification = False
+        session.last_step_suggested = None
+
+        if session.deferred_intents:
+            session.current_category = session.deferred_intents.pop(0)
+            msg += "Here is the status of your reported issues:\n"
+            for ri in session.resolved_intents:
+                msg += f"- [x] {ri} (Resolved)\n"
+            msg += f"- [ ] {session.current_category} (Pending)\n"
+            for di in session.deferred_intents:
+                msg += f"- [ ] {di} (Pending)\n"
+            msg += f"\nWould you like to troubleshoot **{session.current_category}** now?"
+        else:
+            if session.resolved_intents:
+                msg += "Here is the status of your reported issues:\n"
+                for ri in session.resolved_intents:
+                    msg += f"- [x] {ri} (Resolved)\n"
+            session.current_category = None
+            msg += "\nLooks like we've covered everything you mentioned. Is there anything else I can help you with today?"
+
+        session.add_message("agent", msg, {"intent": "issue_resolved"})
+        save_session(session)
+        elapsed = (time.time() - overall_start) * 1000
+        log_pipeline_event("issue_resolved_response", session_id, {"elapsed_ms": elapsed})
+        return _result(msg, session, elapsed, intent="issue_resolved")
+
+    # ── Create Ticket (deterministic — bypass LLM entirely)
+    if intent == "create_ticket":
+        category = session.current_category or "Other"
+        # Build summary from conversation context
+        summary = f"{category} issue reported by user"
+        # Build description from conversation history (filter out meta-commands)
+        ticket_noise = ["create ticket", "raise ticket", "log ticket", "open ticket",
+                        "create a ticket", "raise a ticket", "submit ticket", "file a ticket"]
+        desc_parts = []
+        seen_content = set()
+        for h in session.history:
+            if h["role"] == "user":
+                text = h["content"].strip()
+                text_lower = text.lower()
+                # Skip ticket creation commands and duplicates
+                if any(sig in text_lower for sig in ticket_noise):
+                    continue
+                if text_lower in seen_content:
+                    continue
+                seen_content.add(text_lower)
+                desc_parts.append(f"- {text[:200]}")
+        if session.steps_completed:
+            desc_parts.append(f"\nTroubleshooting steps attempted: {', '.join(session.steps_completed)}")
+        if session.failed_steps:
+            desc_parts.append(f"Steps that did not resolve: {', '.join(session.failed_steps)}")
+        description = "\n".join(desc_parts) if desc_parts else question
+
+        draft = {
+            "summary": summary,
+            "description": description,
+            "category": category,
+            "priority": _detect_priority(" ".join(h["content"] for h in session.history if h["role"] == "user")),
+        }
+        session.draft_ticket = draft
+        session.awaiting_ticket_confirmation = True
+
+        msg = "I've drafted a support ticket based on our conversation. Please review the details below.\n\nSay **'yes'** to submit it, or tell me what you'd like to change."
+        session.add_message("agent", msg, {"intent": "create_ticket", "draft_ticket": draft})
+        save_session(session)
+        elapsed = (time.time() - overall_start) * 1000
+        log_pipeline_event("ticket_drafted", session_id, {"draft": draft, "elapsed_ms": elapsed})
+        return {
+            **_result(msg, session, elapsed, intent="create_ticket"),
+            "draft_ticket": draft,
+        }
 
     # ── Step failed bookkeeping
     if intent == "step_failed" and session.last_step_suggested:
@@ -506,27 +636,17 @@ def process_message(question, session_id, user_name=None):
 
     ticket = None
     if ticket_data:
-        ticket = ticket_service.create_ticket(
-            summary=ticket_data.get("summary", question[:100]),
-            description=ticket_data.get("description", question),
-            category=ticket_data.get("category", session.current_category or "Other"),
-            priority=ticket_data.get("priority", _detect_priority(question)),
-            session_id=session_id,
-            user_name=session.user_name,
-            troubleshooting_done=session.steps_completed,
-            conversation_history=[{"role": h["role"], "content": h["content"]} for h in session.history],
-        )
-        session.ticket_created = ticket
-        metadata["ticket_created"] = ticket["ticket_id"]
-        clean += _format_ticket_card(ticket)
-        logger.info(f"Ticket created: {ticket['ticket_id']}")
-        log_pipeline_event("ticket_created", session_id, {"ticket_id": ticket["ticket_id"]})
+        session.draft_ticket = ticket_data
+        session.awaiting_ticket_confirmation = True
+        clean = "I have drafted a support ticket for you. Does this look good to submit? (Say 'yes' to submit, or tell me what to change)"
+        metadata["draft_ticket"] = ticket_data
 
     if (session.deferred_intents and session.troubleshoot_turn >= 1
             and not ticket and intent != "step_failed" and len(clean) > 100):
         deferred = session.deferred_intents[0]
-        clean += (f"\n\n📌 *I haven't forgotten — you also mentioned a **{deferred}** issue. "
-                  f"Once we resolve this one, just say 'next issue' and we'll tackle that.*")
+        clean += (f"\n\n📌 *I haven't forgotten — you also mentioned a **{deferred}** issue "
+                  f"which is in your pending checklist. "
+                  f"Once we resolve this one, just let me know and we'll tackle that.*")
 
     session.add_message("agent", clean, metadata)
 
@@ -618,6 +738,7 @@ def _result(response, session, elapsed, intent=None, ticket=None, category=None,
         "steps_completed": session.steps_completed,
         "failed_steps": session.failed_steps,
         "ticket": ticket,
+        "draft_ticket": session.draft_ticket,
         "response_time_ms": round(elapsed, 2),
         "kb_sources": [{
             "filename": d.metadata.get("filename", "?"),

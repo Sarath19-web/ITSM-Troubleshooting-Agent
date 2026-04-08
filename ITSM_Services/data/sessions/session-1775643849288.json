@@ -1,0 +1,128 @@
+{
+  "session_id": "session-1775643849288",
+  "user_name": "User",
+  "current_category": "Printer & Peripherals",
+  "troubleshoot_turn": 3,
+  "steps_completed": [
+    "Check your computer settings for any monitors that might be set to turn off automatically"
+  ],
+  "failed_steps": [],
+  "deferred_intents": [],
+  "clarifying_questions_asked": 0,
+  "ticket_created": {
+    "ticket_id": "INC001006",
+    "number": 1006,
+    "status": "Open",
+    "priority": "P3",
+    "priority_label": "Medium",
+    "category": "Printer & Peripherals",
+    "summary": "Printer & Peripherals issue reported by user",
+    "description": "- So my monitor is not turning off\n\nTroubleshooting steps attempted: Check your computer settings for any monitors that might be set to turn off automatically\n\nSteps completed:\n- Check your computer settings for any monitors that might be set to turn off automatically",
+    "created_at": "2026-04-08T16:17:58.956332",
+    "updated_at": "2026-04-08T16:17:58.956332",
+    "assigned_to": "Desktop Support",
+    "user_name": "User",
+    "session_id": "session-1775643849288",
+    "troubleshooting_steps_completed": [
+      "Check your computer settings for any monitors that might be set to turn off automatically"
+    ],
+    "conversation_summary": "[USER] So my monitor is not turning off\n[AGENT] **Step 1: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know if this helps or if you'd like further assistance!\n[USER] So my monitor is not turning off\n[AGENT] **Step 2: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know what happens when you check your computer settings.\n[USER] So my monitor is not turning off\n[AGENT] **Step 2: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know what happens when you check your computer settings.\n[USER] create a ticket\n[AGENT] I've drafted a support ticket based on our conversation. Please review the details below.\n\nSay **'yes'** to submit it, or tell me what you'd like to change.",
+    "notes": []
+  },
+  "history": [
+    {
+      "role": "user",
+      "content": "So my monitor is not turning off",
+      "timestamp": "2026-04-08T10:33:15.899034",
+      "metadata": {}
+    },
+    {
+      "role": "agent",
+      "content": "**Step 1: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know if this helps or if you'd like further assistance!",
+      "timestamp": "2026-04-08T10:33:41.245546",
+      "metadata": {
+        "intent": "troubleshoot",
+        "category": "Printer & Peripherals",
+        "turn": 1,
+        "deferred_intents": [],
+        "kb_articles": [
+          "KB004_Printer_Issues.md",
+          "KB004_Printer_Issues.md"
+        ]
+      }
+    },
+    {
+      "role": "user",
+      "content": "So my monitor is not turning off",
+      "timestamp": "2026-04-08T10:43:39.138408",
+      "metadata": {}
+    },
+    {
+      "role": "agent",
+      "content": "**Step 2: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know what happens when you check your computer settings.",
+      "timestamp": "2026-04-08T10:44:10.431764",
+      "metadata": {
+        "intent": "troubleshoot",
+        "category": "Printer & Peripherals",
+        "turn": 2,
+        "deferred_intents": [],
+        "kb_articles": [
+          "KB004_Printer_Issues.md",
+          "KB004_Printer_Issues.md"
+        ]
+      }
+    },
+    {
+      "role": "user",
+      "content": "So my monitor is not turning off",
+      "timestamp": "2026-04-08T10:47:05.288010",
+      "metadata": {}
+    },
+    {
+      "role": "agent",
+      "content": "**Step 2: Check your computer settings for any monitors that might be set to turn off automatically**\n\nLet me know what happens when you check your computer settings.",
+      "timestamp": "2026-04-08T10:47:18.680927",
+      "metadata": {
+        "intent": "troubleshoot",
+        "category": "Printer & Peripherals",
+        "turn": 3,
+        "deferred_intents": [],
+        "kb_articles": [
+          "KB004_Printer_Issues.md",
+          "KB004_Printer_Issues.md"
+        ]
+      }
+    },
+    {
+      "role": "user",
+      "content": "create a ticket",
+      "timestamp": "2026-04-08T10:47:47.157079",
+      "metadata": {}
+    },
+    {
+      "role": "agent",
+      "content": "I've drafted a support ticket based on our conversation. Please review the details below.\n\nSay **'yes'** to submit it, or tell me what you'd like to change.",
+      "timestamp": "2026-04-08T10:47:47.158207",
+      "metadata": {
+        "intent": "create_ticket",
+        "draft_ticket": {
+          "summary": "Printer & Peripherals issue reported by user",
+          "description": "- So my monitor is not turning off\n\nTroubleshooting steps attempted: Check your computer settings for any monitors that might be set to turn off automatically",
+          "category": "Printer & Peripherals",
+          "priority": "P3"
+        }
+      }
+    },
+    {
+      "role": "agent",
+      "content": "Your ticket has been submitted successfully! 🎉",
+      "timestamp": "2026-04-08T10:47:58.958482",
+      "metadata": {
+        "intent": "ticket_created",
+        "ticket_created": "INC001006"
+      }
+    }
+  ],
+  "created_at": "2026-04-08T10:33:15.899034",
+  "updated_at": "2026-04-08T10:47:58.958482"
+}

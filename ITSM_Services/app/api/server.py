@@ -131,6 +131,7 @@ def chat(req: ChatRequest):
         "steps_completed": result.get("steps_completed", []),
         "failed_steps": result.get("failed_steps", []),
         "ticket": result["ticket"],
+        "draft_ticket": result.get("draft_ticket", None),
         "response_time_ms": result["response_time_ms"],
         "kb_sources": result["kb_sources"],
         "from_cache": result.get("from_cache", False),
@@ -149,6 +150,18 @@ def create_ticket(req: TicketRequest):
         category=req.category, priority=req.priority,
         description=req.description, user_name=req.user_name,
     )
+    # Clear draft state and persist ticket to session history
+    if req.session_id and req.session_id in _sessions:
+        session = _sessions[req.session_id]
+        session.draft_ticket = None
+        session.awaiting_ticket_confirmation = False
+        session.ticket_created = ticket
+        # Persist ticket creation message so it shows in history on reload
+        session.add_message("agent", "Your ticket has been submitted successfully! 🎉", {
+            "intent": "ticket_created",
+            "ticket_created": ticket["ticket_id"],
+        })
+        save_session(session)
     return {"status": "created", "ticket": ticket}
 
 
