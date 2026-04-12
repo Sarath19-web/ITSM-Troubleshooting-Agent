@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { MessageSquare, LayoutDashboard, FileText, ChevronLeft, ChevronRight, Bot, RefreshCw, Loader2 } from "lucide-react";
-import { getHealth, getCacheStats, listSessions } from "@/lib/api";
+import { MessageSquare, ChevronLeft, ChevronRight, Bot, RefreshCw, Loader2 } from "lucide-react";
+import { getHealth, listSessions } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function AppSidebar() {
@@ -11,19 +11,12 @@ export function AppSidebar() {
 
   const navItems = [
     { label: "Chat", to: "/", icon: MessageSquare },
-    { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-    { label: "Logs", to: "/logs", icon: FileText },
   ];
 
   const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ["health"],
     queryFn: getHealth,
     refetchInterval: 30_000,
-  });
-
-  const { data: cacheStats, isLoading: cacheLoading } = useQuery({
-    queryKey: ["cache-stats"],
-    queryFn: getCacheStats,
   });
 
   const { data: sessionsData, isLoading: sessionsLoading, refetch: refetchSessions } = useQuery({
@@ -94,23 +87,6 @@ export function AppSidebar() {
             </div>
           ) : (
             <p className="text-xs text-sidebar-foreground/40">No sessions yet</p>
-          )}
-        </div>
-      )}
-
-      {/* Cache Stats */}
-      {!collapsed && (
-        <div className="px-4 py-3 border-t border-sidebar-border">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 mb-2">Cache Stats</p>
-          {cacheLoading ? (
-            <Skeleton className="h-8 w-full bg-sidebar-accent/30" />
-          ) : cacheStats ? (
-            <div className="space-y-1 text-xs text-sidebar-foreground/70">
-              <div className="flex justify-between"><span>Entries</span><span className="font-semibold text-sidebar-foreground">{cacheStats.total_entries}</span></div>
-              <div className="flex justify-between"><span>Total Hits</span><span className="font-semibold text-sidebar-foreground">{cacheStats.total_hits}</span></div>
-            </div>
-          ) : (
-            <p className="text-xs text-sidebar-foreground/40">Unavailable</p>
           )}
         </div>
       )}

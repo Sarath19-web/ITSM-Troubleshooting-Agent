@@ -1,8 +1,9 @@
+import asyncio
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Set
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -16,10 +17,14 @@ from app.services.session_store import (
 )
 from app.services.faq_cache import faq_cache
 from app.services.logger import setup_logging, get_logger, log_access, PIPELINE_LOG, ACCESS_LOG, ERROR_LOG
+from app.services.ws_manager import ws_manager
 from app.config import TICKET_CATEGORIES, TICKET_PRIORITIES, MAX_TROUBLESHOOT_TURNS
 
 setup_logging()
 logger = get_logger("api")
+
+# Sessions where the AI agent is paused (human agent has taken over)
+_paused_sessions: Set[str] = set()
 
 app = FastAPI(title="ITSM Troubleshooting Agent API", version="1.1")
 
@@ -86,6 +91,11 @@ class TicketUpdateRequest(BaseModel):
 class ResetRequest(BaseModel):
     session_id: Optional[str] = "default"
 
+class AgentReplyRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1, max_length=4000)
+    agent_name: Optional[str] = "IT Support Agent"
+
 
 # ──────────────────────────────────────────────────────────────────
 # Health & meta
@@ -116,10 +126,60 @@ def categories():
 # ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
-def chat(req: ChatRequest):
-    result = process_message(req.message, req.session_id, req.user_name)
+async def chat(req: ChatRequest):
+    sid = req.session_id or "default"
+
+    # If agent is paused for this session, just broadcast the user message (no LLM)
+    if sid in _paused_sessions:
+        now = datetime.utcnow().isoformat()
+        user_msg = {"type": "new_message", "message": {
+            "role": "user", "content": req.message, "timestamp": now, "metadata": {},
+        }}
+        await ws_manager.broadcast(sid, user_msg)
+
+        # Still save the user message in session history
+        session = _sessions.get(sid)
+        if session:
+            session.add_message("user", req.message, {})
+            save_session(session)
+
+        return {
+            "reply": None,
+            "session_id": sid,
+            "intent": "agent_paused",
+            "category": None,
+            "troubleshoot_turn": 0,
+            "max_turns": MAX_TROUBLESHOOT_TURNS,
+            "deferred_intents": [],
+            "steps_completed": [],
+            "failed_steps": [],
+            "ticket": None,
+            "draft_ticket": None,
+            "response_time_ms": 0,
+            "kb_sources": [],
+            "from_cache": False,
+            "cache_type": None,
+            "agent_paused": True,
+        }
+
+    # Run blocking LLM call in a thread so the event loop stays free for WebSockets
+    result = await asyncio.to_thread(process_message, req.message, req.session_id, req.user_name)
     if not result:
         raise HTTPException(500, "Agent failed to process message.")
+
+    # Broadcast both the user message and agent reply to WS subscribers
+    sid = result["session_id"]
+    now = datetime.utcnow().isoformat()
+    user_msg = {"type": "new_message", "message": {
+        "role": "user", "content": req.message, "timestamp": now, "metadata": {},
+    }}
+    agent_msg = {"type": "new_message", "message": {
+        "role": "agent", "content": result["response"], "timestamp": now,
+        "metadata": {"intent": result.get("intent"), "category": result.get("category")},
+    }}
+    await ws_manager.broadcast(sid, user_msg)
+    await ws_manager.broadcast(sid, agent_msg)
+
     return {
         "reply": result["response"],
         "session_id": result["session_id"],
@@ -267,6 +327,66 @@ def delete_session_endpoint(session_id: str):
 
 
 # ──────────────────────────────────────────────────────────────────
+# IT Assist — Human agent sends a message into a user session
+# ──────────────────────────────────────────────────────────────────
+
+@app.post("/agent/reply")
+async def agent_reply(req: AgentReplyRequest):
+    """IT support staff injects a reply into an active user session."""
+    session = _sessions.get(req.session_id)
+    if not session:
+        data = load_session(req.session_id)
+        if not data:
+            raise HTTPException(404, f"Session {req.session_id} not found")
+        # Hydrate into memory so the message gets appended
+        from app.core.engine import get_session as _get_session
+        session = _get_session(req.session_id)
+
+    msg_data = {
+        "role": "agent",
+        "content": req.message,
+        "timestamp": datetime.utcnow().isoformat(),
+        "metadata": {"intent": "human_agent", "agent_name": req.agent_name},
+    }
+    session.add_message("agent", req.message, {
+        "intent": "human_agent",
+        "agent_name": req.agent_name,
+    })
+    save_session(session)
+
+    # Broadcast to all WS subscribers on this session
+    await ws_manager.broadcast(req.session_id, {"type": "new_message", "message": msg_data})
+
+    return {
+        "status": "sent",
+        "session_id": req.session_id,
+        "message_count": len(session.history),
+    }
+
+
+@app.post("/agent/pause/{session_id}")
+def pause_agent(session_id: str):
+    """Pause the AI agent for a session (human takes over)."""
+    _paused_sessions.add(session_id)
+    logger.info(f"Agent PAUSED for session {session_id}")
+    return {"status": "paused", "session_id": session_id}
+
+
+@app.post("/agent/resume/{session_id}")
+def resume_agent(session_id: str):
+    """Resume the AI agent for a session."""
+    _paused_sessions.discard(session_id)
+    logger.info(f"Agent RESUMED for session {session_id}")
+    return {"status": "resumed", "session_id": session_id}
+
+
+@app.get("/agent/status/{session_id}")
+def agent_status(session_id: str):
+    """Check whether the AI agent is paused for a session."""
+    return {"session_id": session_id, "paused": session_id in _paused_sessions}
+
+
+# ──────────────────────────────────────────────────────────────────
 # FAQ Cache
 # ──────────────────────────────────────────────────────────────────
 
@@ -336,3 +456,25 @@ def logs_errors(limit: int = 100):
     """Recent errors."""
     entries = _tail_jsonl(ERROR_LOG, n=limit)
     return {"errors": entries, "count": len(entries)}
+
+
+# ──────────────────────────────────────────────────────────────────
+# WebSocket — real-time session messaging
+# ──────────────────────────────────────────────────────────────────
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(ws: WebSocket, session_id: str):
+    """Subscribe to real-time messages for a session.
+
+    Both the user chat page and the IT Assist dashboard connect here.
+    New messages (from either side) are broadcast to all subscribers.
+    """
+    await ws_manager.connect(ws, session_id)
+    try:
+        while True:
+            # Keep the connection alive; the client just listens
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws, session_id)
+    except Exception:
+        ws_manager.disconnect(ws, session_id)

@@ -32,6 +32,7 @@ def save_session(session):
             "session_id": session.session_id,
             "user_name": session.user_name,
             "current_category": session.current_category,
+            "original_issue": getattr(session, "original_issue", None),
             "troubleshoot_turn": session.troubleshoot_turn,
             "steps_completed": session.steps_completed,
             "failed_steps": session.failed_steps,
@@ -134,6 +135,7 @@ def restore_into_session_object(session, data):
     """Hydrate an in-memory ITSMSession from a dict loaded from disk."""
     session.user_name = data.get("user_name")
     session.current_category = data.get("current_category")
+    session.original_issue = data.get("original_issue")
     session.troubleshoot_turn = data.get("troubleshoot_turn", 0)
     session.steps_completed = data.get("steps_completed", [])
     session.failed_steps = data.get("failed_steps", [])

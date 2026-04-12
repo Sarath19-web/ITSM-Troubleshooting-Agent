@@ -30,6 +30,7 @@ export interface ChatResponse {
   steps_completed?: string[];
   failed_steps?: string[];
   ticket: Ticket | null;
+  draft_ticket?: Partial<Ticket> | null;
   response_time_ms: number;
   kb_sources: KBSource[];
   from_cache?: boolean;
@@ -61,11 +62,16 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   ticket?: Ticket;
+  draft_ticket?: Partial<Ticket>;
   kb_sources?: KBSource[];
   troubleshoot_turn?: number;
   max_turns?: number;
   from_cache?: boolean;
   cache_type?: "exact" | "semantic";
+  metadata?: {
+    intent?: string;
+    agent_name?: string;
+  };
 }
 
 export interface TicketStats {

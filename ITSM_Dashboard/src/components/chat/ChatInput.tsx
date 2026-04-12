@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Send, Ticket, RefreshCw, ClipboardList } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Send, Ticket, RefreshCw } from "lucide-react";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -50,9 +49,6 @@ export function ChatInput({ onSend, onNewChat, onCreateTicket, disabled }: ChatI
           <button onClick={onNewChat} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-[#79AE6F]/40 hover:bg-[#79AE6F]/20 transition-colors text-black/90">
             <RefreshCw className="w-3.5 h-3.5" /> New Chat
           </button>
-          <Link to="/dashboard" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-[#79AE6F]/40 hover:bg-[#79AE6F]/20 transition-colors text-black/90">
-            <ClipboardList className="w-3.5 h-3.5" /> View Tickets
-          </Link>
         </div>
       </div>
       <div className="text-center text-xs text-black/60 px-4">

@@ -10,17 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LogsRouteImport } from './routes/logs'
-import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ItassistPipelineRouteImport } from './routes/itassist.pipeline'
+import { Route as ItassistErrorsRouteImport } from './routes/itassist.errors'
+import { Route as ItassistDashboardRouteImport } from './routes/itassist.dashboard'
 
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -28,35 +25,74 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ItassistPipelineRoute = ItassistPipelineRouteImport.update({
+  id: '/itassist/pipeline',
+  path: '/itassist/pipeline',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ItassistErrorsRoute = ItassistErrorsRouteImport.update({
+  id: '/itassist/errors',
+  path: '/itassist/errors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ItassistDashboardRoute = ItassistDashboardRouteImport.update({
+  id: '/itassist/dashboard',
+  path: '/itassist/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/logs': typeof LogsRoute
+  '/itassist/dashboard': typeof ItassistDashboardRoute
+  '/itassist/errors': typeof ItassistErrorsRoute
+  '/itassist/pipeline': typeof ItassistPipelineRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/logs': typeof LogsRoute
+  '/itassist/dashboard': typeof ItassistDashboardRoute
+  '/itassist/errors': typeof ItassistErrorsRoute
+  '/itassist/pipeline': typeof ItassistPipelineRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/logs': typeof LogsRoute
+  '/itassist/dashboard': typeof ItassistDashboardRoute
+  '/itassist/errors': typeof ItassistErrorsRoute
+  '/itassist/pipeline': typeof ItassistPipelineRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/logs'
+  fullPaths:
+    | '/'
+    | '/logs'
+    | '/itassist/dashboard'
+    | '/itassist/errors'
+    | '/itassist/pipeline'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/logs'
-  id: '__root__' | '/' | '/dashboard' | '/logs'
+  to:
+    | '/'
+    | '/logs'
+    | '/itassist/dashboard'
+    | '/itassist/errors'
+    | '/itassist/pipeline'
+  id:
+    | '__root__'
+    | '/'
+    | '/logs'
+    | '/itassist/dashboard'
+    | '/itassist/errors'
+    | '/itassist/pipeline'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  DashboardRoute: typeof DashboardRoute
   LogsRoute: typeof LogsRoute
+  ItassistDashboardRoute: typeof ItassistDashboardRoute
+  ItassistErrorsRoute: typeof ItassistErrorsRoute
+  ItassistPipelineRoute: typeof ItassistPipelineRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -68,13 +104,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LogsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -82,13 +111,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/itassist/pipeline': {
+      id: '/itassist/pipeline'
+      path: '/itassist/pipeline'
+      fullPath: '/itassist/pipeline'
+      preLoaderRoute: typeof ItassistPipelineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/itassist/errors': {
+      id: '/itassist/errors'
+      path: '/itassist/errors'
+      fullPath: '/itassist/errors'
+      preLoaderRoute: typeof ItassistErrorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/itassist/dashboard': {
+      id: '/itassist/dashboard'
+      path: '/itassist/dashboard'
+      fullPath: '/itassist/dashboard'
+      preLoaderRoute: typeof ItassistDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  DashboardRoute: DashboardRoute,
   LogsRoute: LogsRoute,
+  ItassistDashboardRoute: ItassistDashboardRoute,
+  ItassistErrorsRoute: ItassistErrorsRoute,
+  ItassistPipelineRoute: ItassistPipelineRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

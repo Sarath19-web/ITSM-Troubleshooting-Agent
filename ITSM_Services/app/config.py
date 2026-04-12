@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -10,16 +13,21 @@ PIPELINE_LOG = str(BASE_DIR / "logs" / "pipeline.jsonl")
 LOG_DIR = str(BASE_DIR / "logs")
 
 EMBEDDING_MODEL = "nomic-embed-text"
-LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
+# LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
 # LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+# ── Groq Cloud LLM ──
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "ollama"
 
 RETRIEVAL_K = 4
 RERANK_TOP_N = 2
 MAX_CONTEXT_CHARS = 2000
-LLM_NUM_PREDICT = 256
+LLM_NUM_PREDICT = 512
 LLM_TEMPERATURE = 0.0
-LLM_NUM_CTX = 2048
+LLM_NUM_CTX = 4096
 
 MAX_TROUBLESHOOT_TURNS = 5
 

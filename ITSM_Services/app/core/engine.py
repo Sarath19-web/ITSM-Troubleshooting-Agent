@@ -4,17 +4,20 @@ import time
 from datetime import datetime
 
 from langchain_ollama import OllamaLLM, OllamaEmbeddings
+from langchain_groq import ChatGroq
 from langchain_community.vectorstores import Chroma
 
 from app.config import (
     DB_PATH, EMBEDDING_MODEL, LLM_MODEL, RETRIEVAL_K, RERANK_TOP_N,
     LLM_NUM_PREDICT, LLM_TEMPERATURE, LLM_NUM_CTX,
     MAX_TROUBLESHOOT_TURNS, TICKET_CATEGORIES,
+    LLM_PROVIDER, GROQ_API_KEY,
 )
 from app.services.tickets import ticket_service
 from app.services.logger import get_logger, log_pipeline_event, Timer
 from app.services.session_store import save_session, load_session, restore_into_session_object
 from app.services.faq_cache import faq_cache
+from app.core.guardrails import check_input, check_output
 
 logger = get_logger("engine")
 
@@ -43,20 +46,32 @@ def _get_embeddings_model():
 def _get_llm():
     global _llm
     if _llm is None:
-        print(f"Initializing LLM model {LLM_MODEL}...")
-        with Timer(logger, "init_llm", model=LLM_MODEL):
-            _llm = OllamaLLM(
-                model=LLM_MODEL,
-                num_predict=LLM_NUM_PREDICT,
-                temperature=LLM_TEMPERATURE,
-                num_ctx=LLM_NUM_CTX,
-                stop=[
-                    "\nUser:", "\nUSER:", "User said:", "The user just said",
-                    "\n===", "=== ",
-                    "\nAlex:", "\nAGENT:", "\nAssistant:",
-                    "## YOUR RESPONSE", "## USER", "## CONVERSATION",
-                ],
-            )
+        print(f"Initializing LLM: provider={LLM_PROVIDER} model={LLM_MODEL}")
+        with Timer(logger, "init_llm", model=LLM_MODEL, provider=LLM_PROVIDER):
+            if LLM_PROVIDER == "groq":
+                _llm = ChatGroq(
+                    model=LLM_MODEL,
+                    api_key=GROQ_API_KEY,
+                    temperature=LLM_TEMPERATURE,
+                    max_tokens=LLM_NUM_PREDICT,
+                    stop_sequences=[
+                        "\nUser:", "\n===",
+                        "## YOUR RESPONSE", "## CONVERSATION",
+                    ],
+                )
+            else:
+                _llm = OllamaLLM(
+                    model=LLM_MODEL,
+                    num_predict=LLM_NUM_PREDICT,
+                    temperature=LLM_TEMPERATURE,
+                    num_ctx=LLM_NUM_CTX,
+                    stop=[
+                        "\nUser:", "\nUSER:", "User said:", "The user just said",
+                        "\n===", "=== ",
+                        "\nAlex:", "\nAGENT:", "\nAssistant:",
+                        "## YOUR RESPONSE", "## USER", "## CONVERSATION",
+                    ],
+                )
     return _llm
 
 
@@ -67,6 +82,15 @@ def _embed_for_cache(text):
     except Exception as e:
         logger.warning(f"Embed for cache failed: {e}")
         return None
+
+
+def _invoke_llm(prompt):
+    """Invoke LLM and return plain text regardless of provider."""
+    result = _get_llm().invoke(prompt)
+    # ChatGroq returns AIMessage, OllamaLLM returns str
+    if hasattr(result, 'content'):
+        return result.content
+    return str(result)
 
 
 PROBLEM_KEYWORDS = {
@@ -84,7 +108,17 @@ NEGATIVE_RESPONSES = ["no", "nope", "nah", "negative", "not yet", "haven't"]
 POSITIVE_RESPONSES = ["yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "do it"]
 ALREADY_TRIED = ["already tried", "tried that", "did that", "already did", "still not working",
                  "didn't work", "did not work", "doesn't work", "not working", "no luck",
-                 "still broken", "still failing", "same issue", "not fixed", "not resolved"]
+                 "still broken", "still failing", "same issue", "not fixed", "not resolved",
+                 "nothing happened", "no change", "same problem"]
+
+# Patterns indicating the user is reporting a step outcome (positive or negative)
+_STEP_NEGATIVE_PATTERNS = [
+    re.compile(r'(?:it|that|this|page|screen|the).*(?:not|isn\'t|doesn\'t|won\'t|can\'t|cannot).*(?:work|load|open|connect|start|show|display|appear|respond)', re.I),
+    re.compile(r'(?:not|no|can\'t|cannot|couldn\'t)\s+(?:loading|working|connecting|opening|showing|displaying|appearing|responding)', re.I),
+    re.compile(r'(?:still|keeps?)\s+(?:blank|black|frozen|stuck|loading|spinning|crashing|failing|disconnecting)', re.I),
+    re.compile(r'(?:getting|shows?|see|seeing)\s+(?:an?\s+)?(?:error|blank|black screen|nothing|same)', re.I),
+    re.compile(r'^(?:no|nope|nah|nothing|blank|black|error)\s*$', re.I),    re.compile(r'(?:no\s+)?(?:it\s+)?(?:doesn\'?t|does\s+not|didn\'?t|did\s+not)\s+(?:load|work|connect|open|help)', re.I),
+    re.compile(r'(?:can\'?t|cannot|couldn\'?t)\s+(?:connect|load|open|access|reach|get)', re.I),]
 
 
 class ITSMSession:
@@ -92,6 +126,7 @@ class ITSMSession:
         self.session_id = session_id
         self.history = []
         self.current_category = None
+        self.original_issue = None          # ← stores the user's first problem description
         self.troubleshoot_turn = 0
         self.steps_completed = []
         self.failed_steps = []
@@ -160,6 +195,12 @@ def _classify_intent(question, session=None):
     if any(s in q for s in ALREADY_TRIED):
         return "step_failed"
 
+    # Context-aware: if we're mid-troubleshooting and user describes a negative outcome
+    if session and session.troubleshoot_turn > 0 and session.last_step_suggested:
+        for pattern in _STEP_NEGATIVE_PATTERNS:
+            if pattern.search(q):
+                return "step_failed"
+
     ticket_signals = ["create ticket", "raise ticket", "log ticket", "open ticket",
                       "raise a ticket", "create a ticket", "submit ticket", "file a ticket"]
     if any(s in q for s in ticket_signals):
@@ -188,7 +229,16 @@ def _classify_intent(question, session=None):
                 rest = q[len(g):].strip(" ,!.")
                 if not rest or rest in short_help:
                     return "greeting"
-
+    # Out-of-scope: no IT problem keywords detected and doesn't look like IT
+    if not has_problem and not session:
+        return "out_of_scope"
+    if not has_problem and session and not session.current_category and session.troubleshoot_turn == 0:
+        # Check if it's a general non-IT question
+        it_terms = ["computer", "laptop", "desktop", "phone", "device", "app", "system",
+                     "error", "issue", "problem", "broken", "not working", "help",
+                     "fix", "troubleshoot", "ticket", "support", "reset", "update"]
+        if not any(t in q for t in it_terms):
+            return "out_of_scope"
     return "troubleshoot"
 
 
@@ -233,17 +283,19 @@ SYSTEM_PROMPT = """You are Alex, a friendly and patient IT Helpdesk Assistant at
 - Methodical: ONE specific step at a time
 - Clear: Simple language, exact instructions
 
-## CRITICAL RULES
-1. NEVER give all troubleshooting steps at once. Give ONE step, then STOP.
-2. Every step MUST be a specific action with exact instructions (e.g. "Click Start > Settings > System > Power & sleep" NOT "check your settings").
-3. ALWAYS include exact paths, menu names, or commands. Users should be able to follow without guessing.
-4. ALWAYS ask 1 clarifying question first if the issue is vague.
-5. If user says "already tried that" or "didn't work" → MOVE TO NEXT STEP, never repeat.
-6. DO NOT REPEAT previous questions or steps. Once the user replies, acknowledge and give a NEW step.
-7. If KB doesn't have a clear answer → suggest creating a ticket.
-8. After 4-5 unsuccessful steps → offer to create a ticket.
-9. DO NOT add filler like "Let me know if this helps!" or "Would you like further assistance?". Just give the step and ask what happened.
-10. ALWAYS end with a specific question like "Did that work?" or "What do you see now?".
+## CRITICAL RULES — READ CAREFULLY
+1. **READ THE CONVERSATION HISTORY BELOW.** Your response MUST continue logically from the last exchange.
+2. NEVER give all troubleshooting steps at once. Give ONE step, then STOP.
+3. Every step MUST be a specific action with exact instructions (e.g. "Click Start > Settings > System > Power & sleep" NOT "check your settings").
+4. ALWAYS include exact paths, menu names, or commands. Users should be able to follow without guessing.
+5. ALWAYS ask 1 clarifying question first if the issue is vague.
+6. **NEVER REPEAT a step that already appears in the CONVERSATION HISTORY or in the STEPS ALREADY ATTEMPTED list.** If the user says "didn't work" or "already tried", give a COMPLETELY DIFFERENT next step.
+7. **DO NOT REPEAT previous questions or steps.** If you already asked something or suggested something, move forward, not backward.
+8. If KB doesn't have a clear answer → suggest creating a ticket.
+9. After 4-5 unsuccessful steps → offer to create a ticket.
+10. DO NOT add filler text. Just give the step and ask what happened.
+11. ALWAYS end with a specific question like "Did that work?" or "What do you see now?".
+12. The STEP NUMBER must continue from where we left off (see SESSION STATE below).
 
 ## RESPONSE FORMAT
 Use markdown: **bold** for important items, numbered lists for sub-steps.
@@ -273,25 +325,31 @@ def _build_prompt(question, session, kb_chunks, intent_hint=""):
     context_parts = [f"[{d.metadata.get('category','?')}] {d.page_content[:600]}" for d in kb_chunks]
     kb_context = "\n---\n".join(context_parts) if context_parts else "(No KB articles found)"
 
+    # Build conversation history with clear turn markers
     history_text = ""
-    for h in session.get_recent_context(8):
+    for h in session.get_recent_context(10):
         role = "User" if h["role"] == "user" else "Alex"
-        history_text += f"{role}: {h['content'][:300]}\n"
+        history_text += f"{role}: {h['content'][:400]}\n"
 
     state_info = []
     if session.current_category:
         state_info.append(f"- Current issue category: {session.current_category}")
+    if session.original_issue:
+        state_info.append(f"- Original problem reported: {session.original_issue[:200]}")
     state_info.append(f"- Troubleshooting turn: {session.troubleshoot_turn}/{MAX_TROUBLESHOOT_TURNS}")
+    state_info.append(f"- Next step number to give: Step {session.troubleshoot_turn + 1}")
     if session.steps_completed:
-        state_info.append(f"- Steps already attempted: {', '.join(session.steps_completed[-3:])}")
+        state_info.append(f"- ⚠ Steps ALREADY attempted (DO NOT REPEAT THESE): {', '.join(session.steps_completed)}")
     if session.failed_steps:
-        state_info.append(f"- Steps that didn't work: {', '.join(session.failed_steps[-3:])}")
+        state_info.append(f"- ⚠ Steps that FAILED (DO NOT REPEAT THESE): {', '.join(session.failed_steps)}")
     if session.deferred_intents:
         state_info.append(f"- User also mentioned: {', '.join(session.deferred_intents)}")
     if session.troubleshoot_turn >= MAX_TROUBLESHOOT_TURNS - 1:
         state_info.append("- ⚠️ NEAR MAX TURNS — Strongly consider creating a ticket now.")
     if session.clarifying_questions_asked == 0 and session.troubleshoot_turn == 0:
-        state_info.append("- This is the FIRST turn — ask a clarifying question first.")
+        state_info.append("- ⚠ This is the FIRST turn. You MUST ask 1-2 clarifying questions to understand the issue better BEFORE giving any troubleshooting steps.")
+        state_info.append("- Examples: 'What exactly do you see on screen?', 'When did this start?', 'Is this a laptop or desktop?', 'Any error messages?'")
+        state_info.append("- DO NOT give Step 1 yet. Just acknowledge and ask questions.")
 
     extra = ""
     if intent_hint == "step_failed":
@@ -307,19 +365,24 @@ def _build_prompt(question, session, kb_chunks, intent_hint=""):
 
     return f"""{SYSTEM_PROMPT}
 
-=== SESSION STATE ===
+=== SESSION STATE (read this carefully) ===
 {chr(10).join(state_info)}
 {extra}
-=== KNOWLEDGE BASE (use ONLY this information) ===
+=== KNOWLEDGE BASE (use ONLY this information for troubleshooting steps) ===
 {kb_context}
 
-=== CONVERSATION SO FAR ===
+=== CONVERSATION HISTORY (you MUST continue from where this left off) ===
 {history_text}
-=== END ===
+=== END OF HISTORY ===
 
-The user just said: {question}
+The user just said: "{question}"
 
-Respond now as Alex with ONE next step. Do not continue the conversation on behalf of the user. Do not repeat these section headers. Write only Alex's reply:
+IMPORTANT REMINDERS:
+- Your next step number is Step {session.troubleshoot_turn + 1}.
+- Do NOT repeat any step from the conversation above.
+- Respond ONLY as Alex with ONE next step. Do not simulate user replies.
+
+Alex:
 """
 
 
@@ -372,6 +435,26 @@ def _detect_step_attempted(text):
     return None
 
 
+def _is_repeated_step(step_label, session):
+    """Check if a step label is semantically similar to any already attempted/failed step."""
+    if not step_label:
+        return False
+    label_lower = step_label.lower()
+    all_previous = session.steps_completed + session.failed_steps
+    for prev in all_previous:
+        prev_lower = prev.lower()
+        # Exact or near-exact match
+        if label_lower == prev_lower:
+            return True
+        # Significant word overlap (3+ shared words)
+        words_new = set(re.findall(r'\w{3,}', label_lower))
+        words_old = set(re.findall(r'\w{3,}', prev_lower))
+        overlap = words_new & words_old
+        if len(overlap) >= 2 and len(overlap) / max(len(words_new), 1) > 0.5:
+            return True
+    return False
+
+
 def _format_ticket_card(ticket):
     return (f"\n\n---\n\n### ✅ Ticket Created\n\n"
             f"**Ticket ID:** `{ticket['ticket_id']}`\n"
@@ -388,11 +471,26 @@ def process_message(question, session_id, user_name=None):
     logger.info(f"━━━ NEW MESSAGE ━━━ session={session_id} q='{question[:60]}'")
     log_pipeline_event("message_received", session_id, {"question": question[:200], "user": user_name})
 
+    # ── Input Guardrails ──
+    input_check = check_input(question)
+    if not input_check.allowed:
+        logger.warning(f"Input blocked: {input_check.flags}")
+        log_pipeline_event("input_blocked", session_id, {"flags": input_check.flags, "reason": input_check.blocked_reason})
+        session = get_session(session_id)
+        session.add_message("user", question, {"guardrail_flags": input_check.flags})
+        session.add_message("agent", input_check.blocked_reason, {"intent": "guardrail_blocked", "flags": input_check.flags})
+        save_session(session)
+        elapsed = (time.time() - overall_start) * 1000
+        return _result(input_check.blocked_reason, session, elapsed, intent="guardrail_blocked")
+    # Use sanitized text (PII redacted) for downstream processing
+    question = input_check.sanitized_text
+    guardrail_flags = input_check.flags
+
     session = get_session(session_id)
     if user_name:
         session.user_name = user_name
 
-    session.add_message("user", question)
+    session.add_message("user", question, {"guardrail_flags": guardrail_flags} if guardrail_flags else None)
     intent = _classify_intent(question, session)
     logger.info(f"Classified intent: {intent}")
 
@@ -439,12 +537,36 @@ def process_message(question, session_id, user_name=None):
         log_pipeline_event("greeting_response", session_id, {"elapsed_ms": elapsed})
         return _result(greeting, session, elapsed, intent="greeting")
 
+    # ── Out-of-scope (weather, general knowledge, etc.)
+    if intent == "out_of_scope":
+        msg = ("I appreciate you reaching out! However, I'm specifically designed to help with "
+               "**IT support issues** — things like VPN, email, password resets, printer problems, "
+               "software installations, and hardware issues.\n\n"
+               "I'm not able to help with that particular question, but if you have any "
+               "tech issues, I'm here for you! **What IT issue can I help you with?**")
+        session.add_message("agent", msg, {"intent": "out_of_scope"})
+        save_session(session)
+        elapsed = (time.time() - overall_start) * 1000
+        log_pipeline_event("out_of_scope_response", session_id, {"question": question[:200], "elapsed_ms": elapsed})
+        return _result(msg, session, elapsed, intent="out_of_scope")
+
     # ── Ticket status
     if intent == "ticket_status":
         return _handle_ticket_status(question, session, overall_start)
 
-    # ── Issue Resolved
+    # ── Issue Resolved / Thank you
     if intent == "issue_resolved":
+        # If there's nothing active to resolve, treat as a goodbye/thank you
+        if not session.current_category and not session.deferred_intents:
+            msg = ("You're welcome! 😊 Happy I could help.\n\n"
+                   "If you run into any other IT issues in the future, don't hesitate to reach out. "
+                   "Have a great day!")
+            session.add_message("agent", msg, {"intent": "goodbye"})
+            save_session(session)
+            elapsed = (time.time() - overall_start) * 1000
+            log_pipeline_event("goodbye_response", session_id, {"elapsed_ms": elapsed})
+            return _result(msg, session, elapsed, intent="goodbye")
+
         msg = "I'm glad to hear that's resolved!\n\n"
         if session.current_category and session.current_category not in session.resolved_intents:
             session.resolved_intents.append(session.current_category)
@@ -529,13 +651,33 @@ def process_message(question, session_id, user_name=None):
         session.failed_steps.append(session.last_step_suggested)
         logger.info(f"Step marked as failed: {session.last_step_suggested}")
 
-    # ── Category detection + multi-intent
+    # ── Category detection + multi-intent + topic switching
     categories = _detect_categories(question)
     if len(categories) > 1:
         session.deferred_intents = [c for c in categories[1:] if c not in session.deferred_intents]
         logger.info(f"Multi-intent detected. Deferred: {session.deferred_intents}")
-    if categories and not session.current_category:
+
+    # Detect topic switch: user raises a NEW category while one is active
+    if categories and session.current_category and categories[0] != session.current_category:
+        old_cat = session.current_category
+        logger.info(f"Topic switch detected: {old_cat} → {categories[0]}")
+        # Park the old issue as deferred if not resolved
+        if old_cat not in session.resolved_intents and old_cat not in session.deferred_intents:
+            session.deferred_intents.append(old_cat)
+        # Reset troubleshooting state for the new topic
         session.current_category = categories[0]
+        session.original_issue = question
+        session.troubleshoot_turn = 0
+        session.steps_completed = []
+        session.failed_steps = []
+        session.last_step_suggested = None
+        session.awaiting_clarification = False
+    elif categories and not session.current_category:
+        session.current_category = categories[0]
+
+    # Store original issue on first real troubleshoot turn
+    if not session.original_issue and intent == "troubleshoot" and session.troubleshoot_turn == 0:
+        session.original_issue = question
 
     # ── KB unavailable fallback
     if not os.path.exists(DB_PATH):
@@ -590,16 +732,23 @@ def process_message(question, session_id, user_name=None):
             "cache_type": cached.get("cache_type"),
         }
 
-    # ── KB Retrieval
-    kb_chunks = _retrieve_kb(question, session.current_category)
+    # ── KB Retrieval (use original issue for follow-ups so we don't search "didn't work")
+    kb_query = question
+    if session.original_issue and session.troubleshoot_turn > 0:
+        # Mid-troubleshooting: always use the original issue for KB unless user raised a new topic
+        new_categories = _detect_categories(question)
+        if not new_categories or (new_categories and new_categories[0] == session.current_category):
+            kb_query = session.original_issue
+            logger.info(f"Using original issue for KB retrieval: '{kb_query[:60]}'")
+    kb_chunks = _retrieve_kb(kb_query, session.current_category)
     log_pipeline_event("kb_retrieved", session_id, {"chunks": len(kb_chunks)})
 
-    # ── LLM Call
+    # ── LLM Call (with repeat-step retry)
     prompt = _build_prompt(question, session, kb_chunks, intent_hint=intent)
     raw = ""
     try:
         with Timer(logger, "llm_invoke", model=LLM_MODEL) as t:
-            raw = _get_llm().invoke(prompt)
+            raw = _invoke_llm(prompt)
         log_pipeline_event("llm_response", session_id, {"elapsed_ms": t.elapsed_ms, "length": len(raw)})
     except Exception as e:
         logger.error(f"LLM call failed: {e}", exc_info=True)
@@ -613,8 +762,60 @@ def process_message(question, session_id, user_name=None):
     ticket_data = _parse_ticket_block(raw)
     clean = _clean_response(raw)
 
-    session.troubleshoot_turn += 1
+    # ── Output Guardrails ──
+    output_check = check_output(clean, session)
+    if output_check.flags:
+        logger.info(f"Output guardrail flags: {output_check.flags}")
+        log_pipeline_event("output_guardrail", session_id, {"flags": output_check.flags})
+    clean = output_check.sanitized_text
+
+    # ── Repeated-step detection: retry once, then deterministic fallback ──
     step_label = _detect_step_attempted(clean)
+    if step_label and _is_repeated_step(step_label, session):
+        logger.warning(f"REPEATED STEP detected: '{step_label}' — retrying with explicit block list")
+        retry_extra = (
+            f"\n## CRITICAL: You just repeated a step the user already tried! The following steps have ALREADY BEEN DONE:\n"
+            + "\n".join(f"- {s}" for s in (session.steps_completed + session.failed_steps))
+            + "\n\nYou MUST give a COMPLETELY DIFFERENT troubleshooting step. "
+            "Think of an alternative approach that is NOT listed above.\n"
+        )
+        retry_prompt = _build_prompt(question, session, kb_chunks, intent_hint=intent)
+        # Inject the block list right before the final question
+        retry_prompt = retry_prompt.replace(
+            f'The user just said: "{question}"',
+            f'{retry_extra}\nThe user just said: "{question}"'
+        )
+        try:
+            with Timer(logger, "llm_retry", model=LLM_MODEL) as t2:
+                raw2 = _invoke_llm(retry_prompt)
+            clean2 = _clean_response(raw2)
+            output_check2 = check_output(clean2, session)
+            clean2 = output_check2.sanitized_text
+            step_label2 = _detect_step_attempted(clean2)
+
+            if step_label2 and _is_repeated_step(step_label2, session):
+                # Still repeating — use deterministic fallback
+                logger.warning(f"STILL REPEATED after retry: '{step_label2}' — using fallback")
+                step_num = session.troubleshoot_turn + 1
+                clean = (
+                    f"I understand that didn't work. I've tried the standard troubleshooting steps "
+                    f"for this issue and we're not making progress.\n\n"
+                    f"**Step {step_num}: Let me escalate this**\n\n"
+                    f"Since the previous steps haven't resolved your **{session.current_category or 'issue'}**, "
+                    f"I'd recommend we create a support ticket so a specialist can look into this more deeply.\n\n"
+                    f"Would you like me to **create a ticket** for you? Or is there something else you'd like to try?"
+                )
+                step_label = "Escalation recommended"
+            else:
+                clean = clean2
+                step_label = step_label2
+                ticket_data = _parse_ticket_block(raw2) or ticket_data
+                logger.info(f"Retry succeeded with new step: '{step_label}'")
+        except Exception as e:
+            logger.error(f"LLM retry failed: {e}")
+            # Keep the original response as-is
+
+    session.troubleshoot_turn += 1
     if step_label:
         session.last_step_suggested = step_label
         if step_label not in session.steps_completed:
@@ -625,6 +826,54 @@ def process_message(question, session_id, user_name=None):
         session.clarifying_questions_asked += 1
     else:
         session.awaiting_clarification = False
+
+    # ── Auto-escalation at max turns: agent takes charge and creates ticket
+    if session.troubleshoot_turn >= MAX_TROUBLESHOOT_TURNS and not ticket_data:
+        logger.info(f"Auto-escalation triggered at turn {session.troubleshoot_turn}/{MAX_TROUBLESHOOT_TURNS}")
+        category = session.current_category or "Other"
+        summary = f"{category} issue — unresolved after {session.troubleshoot_turn} troubleshooting steps"
+        desc_parts = []
+        if session.original_issue:
+            desc_parts.append(f"Original issue: {session.original_issue[:200]}")
+        if session.steps_completed:
+            desc_parts.append(f"Steps attempted: {', '.join(session.steps_completed)}")
+        if session.failed_steps:
+            desc_parts.append(f"Steps that did not resolve: {', '.join(session.failed_steps)}")
+        description = "\n".join(desc_parts) if desc_parts else question
+
+        ticket = ticket_service.create_ticket(
+            summary=summary,
+            description=description,
+            category=category,
+            priority=_detect_priority(" ".join(h["content"] for h in session.history if h["role"] == "user")),
+            session_id=session_id,
+            user_name=session.user_name,
+            troubleshooting_done=session.steps_completed,
+            conversation_history=[{"role": h["role"], "content": h["content"]} for h in session.history],
+        )
+        session.ticket_created = ticket
+        escalation_msg = (
+            f"I've exhausted the troubleshooting steps available to me after **{session.troubleshoot_turn} attempts**, "
+            f"and I want to make sure this gets resolved for you.\n\n"
+            f"I've **automatically escalated** this to our specialist team by creating a support ticket."
+            + _format_ticket_card(ticket)
+            + "\n\nA specialist will review the full conversation history and follow up with you directly. "
+            "Is there anything else I can help you with in the meantime?"
+        )
+        session.add_message("agent", escalation_msg, {
+            "intent": "auto_escalation",
+            "ticket_created": ticket["ticket_id"],
+            "turn": session.troubleshoot_turn,
+        })
+        save_session(session)
+        elapsed = (time.time() - overall_start) * 1000
+        log_pipeline_event("auto_escalation", session_id, {
+            "ticket_id": ticket["ticket_id"],
+            "turns": session.troubleshoot_turn,
+            "elapsed_ms": elapsed,
+        })
+        return _result(escalation_msg, session, elapsed, intent="auto_escalation", ticket=ticket,
+                      category=session.current_category, kb_chunks=kb_chunks)
 
     metadata = {
         "intent": intent,

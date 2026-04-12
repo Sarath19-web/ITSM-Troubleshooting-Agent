@@ -3,12 +3,13 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { sendMessage, resetSession, createTicket, getCategories, getSessionHistory, getTicket } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import type { ChatMessage as ChatMessageType } from "@/lib/types";
+import type { ChatMessage as ChatMessageType, Ticket } from "@/lib/types";
 import { ChatMessage, TypingIndicator } from "@/components/chat/ChatMessage";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { CreateTicketModal } from "@/components/chat/CreateTicketModal";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Bot } from "lucide-react";
+import { useSessionWS } from "@/hooks/use-session-ws";
 
 export const Route = createFileRoute("/")({
   component: ChatPage,
@@ -20,12 +21,41 @@ export const Route = createFileRoute("/")({
 function ChatPage() {
   const { sessionId: urlSessionId } = Route.useSearch();
   const queryClient = useQueryClient();
-  const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [messages, setMessages] = useState<ChatMessageType[]>(() => {
+    // Show greeting on initial load if no session to restore
+    if (!urlSessionId) {
+      return [{
+        id: `greeting-${Date.now()}`,
+        role: "agent" as const,
+        content: "Hi there! I'm Alex, your IT Helpdesk Assistant \ud83d\udc4b\n\nI can help you troubleshoot technical issues \u2014 VPN, email, password, printer, software, and more. Or I can create a support ticket for you.\n\n**What\u2019s going on today?**",
+        timestamp: new Date(),
+      }];
+    }
+    return [];
+  });
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(() => urlSessionId || `session-${Date.now()}`);
   const [modalOpen, setModalOpen] = useState(false);
   const [trackedTickets, setTrackedTickets] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Real-time: receive messages pushed by IT Support agent via WebSocket
+  useSessionWS(sessionId, useCallback((evt) => {
+    if (evt.type !== "new_message") return;
+    const m = evt.message;
+    // Only show human-agent messages (AI replies are already added via handleSend)
+    if (m.metadata?.intent !== "human_agent") return;
+    setMessages((prev) => [...prev, {
+      id: `ws-${Date.now()}-${Math.random()}`,
+      role: m.role as "user" | "agent",
+      content: m.content,
+      timestamp: new Date(m.timestamp),
+      metadata: {
+        intent: "human_agent",
+        agent_name: (m.metadata as any)?.agent_name || "IT Support",
+      },
+    }]);
+  }, []));
 
   const { data: categories } = useQuery({
     queryKey: ["categories"],
@@ -38,12 +68,38 @@ function ChatPage() {
       if (urlSessionId) {
         try {
           const result = await getSessionHistory(urlSessionId);
-          const mappedMessages: ChatMessageType[] = result.history.map((msg, idx) => ({
-            id: `msg-${idx}`,
-            role: msg.role,
-            content: msg.content,
-            timestamp: new Date(msg.timestamp),
-          }));
+          const mappedMessages: ChatMessageType[] = await Promise.all(
+            result.history.map(async (msg, idx) => {
+              let content = msg.content;
+              let ticket = undefined;
+
+              // If message has ticket_created metadata, fetch the ticket and strip markdown
+              const ticketId = msg.metadata?.ticket_created;
+              if (ticketId) {
+                try {
+                  ticket = await getTicket(ticketId);
+                  // Strip the markdown ticket card from content
+                  content = content.replace(/\n*---\n*###\s*✅\s*Ticket Created[\s\S]*$/, "").trim();
+                } catch {
+                  // Ticket fetch failed, keep original content
+                }
+              }
+
+              return {
+                id: `msg-${idx}`,
+                role: msg.role,
+                content,
+                timestamp: new Date(msg.timestamp),
+                ticket,
+                from_cache: msg.metadata?.from_cache,
+                cache_type: msg.metadata?.cache_type,
+                metadata: msg.metadata ? {
+                  intent: msg.metadata.intent,
+                  agent_name: (msg.metadata as any).agent_name,
+                } : undefined,
+              } as ChatMessageType;
+            })
+          );
           setMessages(mappedMessages);
           setSessionId(urlSessionId);
         } catch (error) {
@@ -111,12 +167,16 @@ function ChatPage() {
 
     try {
       const res = await sendMessage({ message: text, session_id: sessionId, user_name: "User" });
+      if (!res.reply && res.agent_paused) {
+        return;
+      }
       const agentMsg: ChatMessageType = {
         id: `a-${Date.now()}`,
         role: "agent",
         content: res.reply,
         timestamp: new Date(),
         ticket: res.ticket || undefined,
+        draft_ticket: res.draft_ticket || undefined,
         kb_sources: res.kb_sources,
         troubleshoot_turn: res.troubleshoot_turn,
         max_turns: res.max_turns,
@@ -144,12 +204,22 @@ function ChatPage() {
       const newId = `session-${Date.now()}`;
       await resetSession(newId);
       setSessionId(newId);
-      setMessages([]);
+      setMessages([{
+        id: `greeting-${Date.now()}`,
+        role: "agent" as const,
+        content: "Hi there! I'm Alex, your IT Helpdesk Assistant \ud83d\udc4b\n\nI can help you troubleshoot technical issues \u2014 VPN, email, password, printer, software, and more. Or I can create a support ticket for you.\n\n**What\u2019s going on today?**",
+        timestamp: new Date(),
+      }]);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     } catch {
       const newId = `session-${Date.now()}`;
       setSessionId(newId);
-      setMessages([]);
+      setMessages([{
+        id: `greeting-${Date.now()}`,
+        role: "agent" as const,
+        content: "Hi there! I'm Alex, your IT Helpdesk Assistant \ud83d\udc4b\n\nI can help you troubleshoot technical issues \u2014 VPN, email, password, printer, software, and more. Or I can create a support ticket for you.\n\n**What\u2019s going on today?**",
+        timestamp: new Date(),
+      }]);
     }
   }, [queryClient]);
 
@@ -176,17 +246,75 @@ function ChatPage() {
     }
   }, [sessionId, queryClient]);
 
+  const handleDraftSubmit = useCallback(async (edited: Partial<Ticket>) => {
+    try {
+      const result = await createTicket({
+        summary: edited.summary || "Support Ticket",
+        category: edited.category || "Other",
+        priority: edited.priority || "P3",
+        description: edited.description || "",
+        session_id: sessionId,
+        user_name: "User",
+      });
+      const ticket = result.ticket || result as any;
+
+      // Track this ticket for status updates
+      setTrackedTickets(prev => new Set([...prev, ticket.ticket_id]));
+
+      // Remove draft from messages and add confirmed ticket message
+      setMessages(prev => {
+        const updated = prev.map(msg =>
+          msg.draft_ticket ? { ...msg, draft_ticket: undefined } : msg
+        );
+        return [...updated, {
+          id: `t-${Date.now()}`,
+          role: "agent" as const,
+          content: "Your ticket has been submitted successfully! 🎉",
+          timestamp: new Date(),
+          ticket,
+        }];
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["ticket-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    } catch {
+      setMessages(prev => [...prev, {
+        id: `e-${Date.now()}`,
+        role: "agent" as const,
+        content: "⚠️ Failed to create ticket. Please try again.",
+        timestamp: new Date(),
+      }]);
+    }
+  }, [sessionId, queryClient]);
+
+  const handleDraftCancel = useCallback(async () => {
+    // Send 'no' to backend to clear draft state
+    try {
+      await sendMessage({ message: "no", session_id: sessionId, user_name: "User" });
+    } catch { /* swallow */ }
+
+    // Remove draft from UI
+    setMessages(prev =>
+      prev.map(msg =>
+        msg.draft_ticket ? { ...msg, draft_ticket: undefined, content: msg.content + "\n\n*Ticket draft cancelled.*" } : msg
+      )
+    );
+  }, [sessionId]);
+
   return (
     <div className="flex min-h-screen w-full">
-      <AppSidebar />
+      <div className="hidden md:block">
+        <AppSidebar />
+      </div>
       <main className="flex-1 flex flex-col h-screen">
         {/* Header */}
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-card">
-          <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center">
-            <Bot className="w-5 h-5 text-primary-foreground" />
+        <div className="flex items-center gap-3 px-4 md:px-6 py-3 md:py-4 border-b border-border bg-card">
+          <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-primary flex items-center justify-center shrink-0">
+            <Bot className="w-4 h-4 md:w-5 md:h-5 text-primary-foreground" />
           </div>
-          <div>
-            <h1 className="text-sm font-semibold">Alex — IT Helpdesk Assistant</h1>
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold truncate">Alex — IT Helpdesk Assistant</h1>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-success" />
               <span className="text-xs text-muted-foreground">Online</span>
@@ -195,7 +323,7 @@ function ChatPage() {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 md:px-4 py-4 md:py-6">
           <div className="max-w-[800px] mx-auto">
             {messages.length === 0 && !isTyping && (
               <div className="text-center py-20">
@@ -204,14 +332,19 @@ function ChatPage() {
               </div>
             )}
             {messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                onSubmitDraft={handleDraftSubmit}
+                onCancelDraft={handleDraftCancel}
+              />
             ))}
             {isTyping && <TypingIndicator />}
           </div>
         </div>
 
         {/* Input */}
-        <div className="max-w-[800px] mx-auto w-full">
+        <div className="max-w-[800px] mx-auto w-full px-2 md:px-0">
           <ChatInput onSend={handleSend} onNewChat={handleNewChat} onCreateTicket={() => setModalOpen(true)} disabled={isTyping} />
         </div>
 

@@ -1,11 +1,14 @@
-import { Bot, Zap, Lightbulb, ChevronDown, ChevronRight } from "lucide-react";
+import { Bot, Zap, Lightbulb, ChevronDown, ChevronRight, CheckSquare, Square, Headset } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
-import type { ChatMessage as ChatMessageType } from "@/lib/types";
+import type { ChatMessage as ChatMessageType, Ticket } from "@/lib/types";
 import { TicketBubble } from "./TicketBubble";
+import { DraftTicketBubble } from "./DraftTicketBubble";
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  onSubmitDraft?: (edited: Partial<Ticket>) => void;
+  onCancelDraft?: () => void;
 }
 
 // Helper function to parse markdown bold (**text**) and convert to bold elements
@@ -19,8 +22,44 @@ function parseMarkdownBold(text: string) {
   });
 }
 
+// Higher-order parser for handling check lists and text blocks
+function parseMessageContent(text: string) {
+  const lines = text.split('\n');
+  return lines.map((line, lineIdx) => {
+    const trimmed = line.trim();
+    const checkedMatch = trimmed.match(/^-\s*\[x\]\s*(.*)/i);
+    const uncheckedMatch = trimmed.match(/^-\s*\[ \]\s*(.*)/i);
+
+    if (checkedMatch || uncheckedMatch) {
+      const isChecked = !!checkedMatch;
+      const content = checkedMatch ? checkedMatch[1] : (uncheckedMatch ? uncheckedMatch[1] : "");
+
+      return (
+        <div key={lineIdx} className="flex items-start gap-2 my-1.5">
+          <div className="mt-[3px] shrink-0">
+            {isChecked ? (
+              <CheckSquare className="w-[14px] h-[14px] text-green-500" />
+            ) : (
+              <Square className="w-[14px] h-[14px] bg-foreground/10 text-foreground/40 rounded border-none" />
+            )}
+          </div>
+          <div className="leading-relaxed">{parseMarkdownBold(content)}</div>
+        </div>
+      );
+    }
+
+    return (
+      <span key={lineIdx}>
+        {parseMarkdownBold(line)}
+        {lineIdx < lines.length - 1 && <br />}
+      </span>
+    );
+  });
+}
+
 // Extract suggestion from content (📌 *text*)
 function extractSuggestion(text: string) {
+  if (!text) return { mainContent: text || "", suggestion: null };
   // Match 📌 *...* at the end or on separate line, handling ** for bold inside
   const suggestionMatch = text.match(/📌\s*\*(.+?)\*\s*$/s);
   if (!suggestionMatch) {
@@ -31,29 +70,43 @@ function extractSuggestion(text: string) {
   return { mainContent, suggestion };
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, onSubmitDraft, onCancelDraft }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const isHumanAgent = message.metadata?.intent === "human_agent";
   const [expandedSuggestion, setExpandedSuggestion] = useState(false);
   const { mainContent, suggestion } = extractSuggestion(message.content);
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"} mb-4`}>
       {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0 mt-1">
-          <Bot className="w-4 h-4 text-primary-foreground" />
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 ${
+          isHumanAgent ? "bg-orange-500" : "bg-primary"
+        }`}>
+          {isHumanAgent ? (
+            <Headset className="w-4 h-4 text-white" />
+          ) : (
+            <Bot className="w-4 h-4 text-primary-foreground" />
+          )}
         </div>
       )}
 
       <div className={`max-w-[75%] space-y-2 ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+        {/* IT Support label */}
+        {isHumanAgent && (
+          <p className="text-[10px] text-orange-500 font-semibold">
+            {message.metadata?.agent_name || "IT Support"}
+          </p>
+        )}
         <div
-          className={`relative px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-            isUser
+          className={`relative px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${isUser
               ? "bg-user-bubble text-user-bubble-foreground rounded-[16px_16px_4px_16px]"
+              : isHumanAgent
+              ? "bg-orange-500/10 text-foreground rounded-[16px_16px_16px_4px] border border-orange-500/20"
               : "bg-agent-bubble text-foreground rounded-[16px_16px_16px_4px]"
-          }`}
+            }`}
         >
-          {parseMarkdownBold(mainContent)}
-          
+          {parseMessageContent(mainContent)}
+
           {/* Suggestion icon in bottom right of bubble */}
           {suggestion && !isUser && (
             <button
@@ -82,6 +135,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
         {/* Ticket card */}
         {message.ticket && <TicketBubble ticket={message.ticket} />}
+        {message.draft_ticket && <DraftTicketBubble draft={message.draft_ticket} onSubmit={onSubmitDraft} onCancel={onCancelDraft} />}
 
         {/* KB Sources */}
         {message.kb_sources && message.kb_sources.length > 0 && !isUser && (

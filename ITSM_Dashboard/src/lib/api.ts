@@ -65,6 +65,18 @@ export const updateTicket = (id: string, body: Partial<Ticket>) =>
   request<{ status: string; ticket: Ticket }>(`/tickets/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 export const getTicketStats = () => request<TicketStats>("/tickets/stats");
 
+// Agent assist — human IT staff sends a reply into a session
+export const agentReply = (body: { session_id: string; message: string; agent_name?: string }) =>
+  request<{ status: string; session_id: string; message_count: number }>("/agent/reply", { method: "POST", body: JSON.stringify(body) });
+
+// Agent pause/resume — toggle AI agent for a session
+export const pauseAgent = (sessionId: string) =>
+  request<{ status: string; session_id: string }>(`/agent/pause/${sessionId}`, { method: "POST" });
+export const resumeAgent = (sessionId: string) =>
+  request<{ status: string; session_id: string }>(`/agent/resume/${sessionId}`, { method: "POST" });
+export const getAgentStatus = (sessionId: string) =>
+  request<{ session_id: string; paused: boolean }>(`/agent/status/${sessionId}`);
+
 // Sessions
 export const listSessions = (limit = 50) =>
   request<{ sessions: SessionSummary[] }>(`/sessions?limit=${limit}`);
@@ -91,8 +103,13 @@ export interface AccessLogEntry {
 }
 export interface ErrorLogEntry {
   timestamp: string;
-  error: string;
-  stack_trace?: string;
+  level: string;
+  logger: string;
+  message: string;
+  module?: string;
+  function?: string;
+  line?: number;
+  exception?: string;
   session_id?: string;
 }
 export const getPipelineLogs = (limit = 100, sessionId?: string) => {
